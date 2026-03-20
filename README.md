@@ -38,8 +38,15 @@ Topic Query
          │
          ▼
 ┌───────────────────┐
-│  RAG Narrative     │  Structured prompt templates
-│  (src/narrative/)  │  Citation-grounded generation
+│  Citation Graph    │  NetworkX directed graph
+│  (src/citation/)   │  PageRank, HITS, bridge scoring
+│                    │  Competition + dominance tracking
+└────────┬──────────┘
+         │
+         ▼
+┌───────────────────┐
+│  RAG Narrative     │  Citation-graph-augmented prompts
+│  (src/narrative/)  │  Influence & competition context
 │                    │  Multi-section output
 └────────┬──────────┘
          │
@@ -47,7 +54,7 @@ Topic Query
 ┌───────────────────┐
 │  Dashboard         │  Streamlit interactive UI
 │  (app.py)          │  Plotly visualizations
-│                    │  Paper browser + search
+│                    │  6 tabs + citation analysis
 └───────────────────┘
 ```
 
@@ -97,9 +104,10 @@ Open `http://localhost:8501` in your browser.
    - Generate SPECTER embeddings
    - Cluster papers into research threads
    - Generate a structured narrative
-4. **Explore results** across five tabs:
+4. **Explore results** across six tabs:
    - **Narrative** — Full research storyline with citations
    - **Clusters** — UMAP visualization and thread details
+   - **Citation Analysis** — Influence scores, competition detection, dominance tracking
    - **Timeline** — Publication and citation trends over time
    - **Papers** — Browsable, filterable paper list
    - **Search** — Semantic similarity search
@@ -125,9 +133,12 @@ CS6235_ResearchNarrative/
 │   │   └── vector_store.py       # FAISS vector store
 │   ├── clustering/
 │   │   └── thread_discovery.py   # HDBSCAN clustering + labeling
+│   ├── citation/
+│   │   ├── graph.py              # NetworkX citation graph
+│   │   ├── influence.py          # Temporal influence scoring
+│   │   └── competition.py        # Competition & dominance detection
 │   ├── narrative/
 │   │   └── generator.py          # RAG narrative generation
-│   └── visualization/            # (reserved for CP3)
 ├── data/
 │   ├── papers/                   # Cached paper collections (JSON)
 │   ├── embeddings/               # Cached embedding arrays
@@ -144,8 +155,9 @@ CS6235_ResearchNarrative/
 | Embeddings | SPECTER2 (allenai/specter2) via Sentence Transformers |
 | Vector Store | FAISS (IndexFlatIP with cosine similarity) |
 | Clustering | UMAP + HDBSCAN |
-| Narrative Gen | OpenAI GPT-4o-mini via structured prompts |
-| Dashboard | Streamlit + Plotly |
+| Citation Graph | NetworkX (PageRank, HITS, bridge scoring) |
+| Narrative Gen | Azure OpenAI GPT-4o via citation-augmented prompts |
+| Dashboard | Streamlit + Plotly (Sankey, radar, area charts) |
 | Language | Python 3.10+ |
 
 ## Checkpoint Status
@@ -159,6 +171,15 @@ CS6235_ResearchNarrative/
   - LLM-assisted cluster labeling
   - RAG narrative generation (with fallback)
   - Streamlit dashboard with 5 interactive tabs
+- **CP3 (Citation Graph Analysis)** — Completed
+  - Citation graph construction with NetworkX
+  - 5-metric temporal influence scoring (PageRank, HITS, bridge, pioneer, burst)
+  - Competition detection between research threads
+  - Complementary thread identification
+  - Dominance tracking over time
+  - Citation Analysis dashboard tab (Sankey, radar, area charts)
+  - S2 API key integration with full citation enrichment
+  - Citation-graph-augmented RAG narratives
 
 ## Author
 

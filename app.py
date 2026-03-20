@@ -204,13 +204,14 @@ if run_button and topic:
 
     step_icons = {
         "init": "🚀", "ingestion": "📥", "embedding": "🧠",
-        "indexing": "📇", "clustering": "🧩", "narrative": "📖", "done": "✅",
+        "indexing": "📇", "clustering": "🧩", "citation_graph": "🔗",
+        "narrative": "📖", "done": "✅",
     }
     step_labels = {
         "init": "Initializing", "ingestion": "Collecting Papers",
         "embedding": "Generating Embeddings", "indexing": "Building Search Index",
-        "clustering": "Discovering Threads", "narrative": "Writing Narrative",
-        "done": "Complete",
+        "clustering": "Discovering Threads", "citation_graph": "Citation Graph Analysis",
+        "narrative": "Writing Narrative", "done": "Complete",
     }
 
     progress_card = st.empty()
@@ -291,7 +292,7 @@ narrative = results["narrative"]
 
 # ── Metrics Row ──────────────────────────────────────────────────────────────
 
-m1, m2, m3, m4 = st.columns(4)
+m1, m2, m3, m4, m5 = st.columns(5)
 with m1:
     st.metric("Papers Analyzed", len(papers))
 with m2:
@@ -304,13 +305,17 @@ with m3:
 with m4:
     total_cites = sum(p.citation_count for p in papers)
     st.metric("Total Citations", f"{total_cites:,}")
+with m5:
+    cg = results.get("citation_graph")
+    n_edges = cg.graph.number_of_edges() if cg else 0
+    st.metric("Citation Links", n_edges)
 
 st.divider()
 
 # ── Tabs ─────────────────────────────────────────────────────────────────────
 
-tab_narrative, tab_clusters, tab_timeline, tab_papers, tab_search = st.tabs([
-    "📖 Narrative", "🧩 Clusters", "📅 Timeline", "📄 Papers", "🔍 Search"
+tab_narrative, tab_clusters, tab_citations, tab_timeline, tab_papers, tab_search = st.tabs([
+    "📖 Narrative", "🧩 Clusters", "🔗 Citation Analysis", "📅 Timeline", "📄 Papers", "🔍 Search"
 ])
 
 # ── Tab 1: Narrative ─────────────────────────────────────────────────────────
@@ -387,7 +392,207 @@ with tab_clusters:
                     f"— {p.citation_count} citations"
                 )
 
-# ── Tab 3: Timeline ─────────────────────────────────────────────────────────
+# ── Tab 3: Citation Analysis ─────────────────────────────────────────────────
+
+with tab_citations:
+    st.markdown("## Citation Graph Analysis")
+    import plotly.express as px
+    import plotly.graph_objects as go
+
+    citation_graph = results.get("citation_graph")
+    influence_scores = results.get("influence_scores")
+    competition_analysis = results.get("competition_analysis")
+
+    if citation_graph:
+        cg_m1, cg_m2, cg_m3 = st.columns(3)
+        with cg_m1:
+            st.metric("Graph Nodes", citation_graph.graph.number_of_nodes())
+        with cg_m2:
+            st.metric("Internal Citations", citation_graph.graph.number_of_edges())
+        with cg_m3:
+            density = 0
+            if citation_graph.graph.number_of_nodes() > 1:
+                n = citation_graph.graph.number_of_nodes()
+                density = citation_graph.graph.number_of_edges() / (n * (n - 1))
+            st.metric("Graph Density", f"{density:.4f}")
+
+    # Influence scores
+    if influence_scores:
+        st.markdown("### Most Influential Papers")
+        st.markdown(
+            "*Composite score combines PageRank (structural importance), "
+            "HITS authority, bridge score (cross-cluster connections), "
+            "temporal pioneer (early entrant), and citation burst.*"
+        )
+
+        ranked_papers = sorted(
+            [(pid, s) for pid, s in influence_scores.items()],
+            key=lambda x: x[1].get("composite", 0),
+            reverse=True,
+        )[:20]
+
+        inf_data = []
+        paper_map = {p.paper_id: p for p in papers}
+        for pid, scores in ranked_papers:
+            p = paper_map.get(pid)
+            if not p:
+                continue
+            first_author = p.authors[0].name if p.authors else "Unknown"
+            inf_data.append({
+                "Paper": f"{first_author} et al., {p.year}",
+                "Title": p.title[:60],
+                "Composite": round(scores["composite"], 4),
+                "PageRank": round(scores["pagerank"], 4),
+                "Authority": round(scores["authority"], 4),
+                "Bridge": round(scores["bridge"], 4),
+                "Pioneer": round(scores["temporal_pioneer"], 4),
+                "Burst": round(scores["citation_burst"], 4),
+                "Thread": p.cluster_label,
+            })
+
+        if inf_data:
+            df_inf = pd.DataFrame(inf_data)
+            st.dataframe(df_inf, use_container_width=True, hide_index=True)
+
+            # Radar chart for top-5 influential papers
+            st.markdown("### Influence Profile — Top 5 Papers")
+            top5 = inf_data[:5]
+            categories = ["PageRank", "Authority", "Bridge", "Pioneer", "Burst"]
+
+            fig_radar = go.Figure()
+            for row in top5:
+                values = [row[c] for c in categories]
+                values.append(values[0])
+                fig_radar.add_trace(go.Scatterpolar(
+                    r=values,
+                    theta=categories + [categories[0]],
+                    fill='toself',
+                    name=row["Paper"],
+                ))
+            fig_radar.update_layout(
+                polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
+                showlegend=True,
+                height=480,
+                title="Influence Dimensions",
+            )
+            st.plotly_chart(fig_radar, use_container_width=True)
+
+    # Competition analysis
+    if competition_analysis:
+        comp_pairs = competition_analysis.get("competition_pairs", [])
+        complementary_pairs = competition_analysis.get("complementary_pairs", [])
+
+        if comp_pairs:
+            st.markdown("### Competing Research Threads")
+            st.markdown(
+                "*Competing threads cite each other frequently with balanced "
+                "cross-citation flow, indicating alternative approaches.*"
+            )
+            comp_data = []
+            for cp in comp_pairs:
+                comp_data.append({
+                    "Thread A": cp["label_a"],
+                    "Thread B": cp["label_b"],
+                    "A → B": cp["a_cites_b"],
+                    "B → A": cp["b_cites_a"],
+                    "Total Cross-Citations": cp["total_cross_citations"],
+                    "Asymmetry": cp["asymmetry"],
+                })
+            df_comp = pd.DataFrame(comp_data)
+            st.dataframe(df_comp, use_container_width=True, hide_index=True)
+
+            # Sankey diagram of cross-citations
+            if len(comp_pairs) > 0:
+                st.markdown("### Cross-Citation Flow")
+                all_labels_set = set()
+                for cp in comp_pairs:
+                    all_labels_set.add(cp["label_a"])
+                    all_labels_set.add(cp["label_b"])
+                all_labels_list = sorted(all_labels_set)
+                label_idx = {l: i for i, l in enumerate(all_labels_list)}
+
+                sankey_source = []
+                sankey_target = []
+                sankey_value = []
+
+                for cp in comp_pairs:
+                    if cp["a_cites_b"] > 0:
+                        sankey_source.append(label_idx[cp["label_a"]])
+                        sankey_target.append(label_idx[cp["label_b"]])
+                        sankey_value.append(cp["a_cites_b"])
+                    if cp["b_cites_a"] > 0:
+                        sankey_source.append(label_idx[cp["label_b"]])
+                        sankey_target.append(label_idx[cp["label_a"]])
+                        sankey_value.append(cp["b_cites_a"])
+
+                if sankey_value:
+                    fig_sankey = go.Figure(data=[go.Sankey(
+                        node=dict(
+                            pad=15, thickness=20, line=dict(color="black", width=0.5),
+                            label=all_labels_list,
+                        ),
+                        link=dict(
+                            source=sankey_source, target=sankey_target, value=sankey_value,
+                        ),
+                    )])
+                    fig_sankey.update_layout(
+                        title_text="Citation Flow Between Competing Threads",
+                        height=400,
+                    )
+                    st.plotly_chart(fig_sankey, use_container_width=True)
+
+        if complementary_pairs:
+            st.markdown("### Complementary Threads")
+            st.markdown(
+                "*One thread builds heavily on another (asymmetric citation flow).*"
+            )
+            for cp in complementary_pairs:
+                st.markdown(
+                    f"- **{cp['foundation_label']}** → **{cp['builder_label']}** "
+                    f"({cp['builder_to_foundation']} citations toward foundation, "
+                    f"asymmetry: {cp['asymmetry']})"
+                )
+
+        # Dominance timeline
+        dominance = competition_analysis.get("dominance_timeline", {})
+        if dominance:
+            st.markdown("### Thread Dominance Over Time")
+            st.markdown("*Share of papers and citations per year by research thread.*")
+
+            dom_data = []
+            for year, entries in sorted(dominance.items()):
+                for entry in entries:
+                    dom_data.append({
+                        "Year": int(year),
+                        "Thread": entry["label"],
+                        "Paper Share": entry["paper_share"],
+                        "Citation Share": entry["citation_share"],
+                        "Papers": entry["papers"],
+                    })
+
+            if dom_data:
+                df_dom = pd.DataFrame(dom_data)
+
+                fig_dom = px.area(
+                    df_dom, x="Year", y="Paper Share", color="Thread",
+                    title="Thread Dominance by Paper Share",
+                    groupnorm="fraction",
+                    height=420,
+                )
+                st.plotly_chart(fig_dom, use_container_width=True)
+
+                fig_cite_dom = px.area(
+                    df_dom, x="Year", y="Citation Share", color="Thread",
+                    title="Thread Dominance by Citation Share",
+                    groupnorm="fraction",
+                    height=420,
+                )
+                st.plotly_chart(fig_cite_dom, use_container_width=True)
+
+    if not citation_graph and not influence_scores and not competition_analysis:
+        st.info("Citation graph analysis data is not available. Run the pipeline to see results.")
+
+# ── Tab 4: Timeline ─────────────────────────────────────────────────────────
 
 with tab_timeline:
     st.markdown("## Publication Timeline")

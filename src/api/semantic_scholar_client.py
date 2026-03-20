@@ -58,14 +58,21 @@ class SemanticScholarClient:
         self._last_request_time = time.time()
 
     def _request_with_retry(self, url: str, params: dict) -> Optional[dict]:
-        """Make a GET request with retry on 429 rate limit errors."""
+        """Make a GET request with retry on 429 rate limit errors.
+
+        Non-retryable status codes (404, 400, 403) are skipped immediately.
+        """
         max_retries = 10
         delay = 5
+        non_retryable = {400, 403, 404, 405, 410}
         resp = None
         for attempt in range(max_retries):
             self._wait()
             try:
                 resp = self.session.get(url, params=params, timeout=30)
+                if resp.status_code in non_retryable:
+                    logger.debug(f"S2 returned {resp.status_code} — skipping (not retryable)")
+                    return None
                 if resp.status_code == 429:
                     self._report(f"S2 rate limited (429). Retrying in {delay}s (attempt {attempt+1}/{max_retries})...")
                     time.sleep(delay)
@@ -73,11 +80,13 @@ class SemanticScholarClient:
                 resp.raise_for_status()
                 return resp.json()
             except requests.RequestException as e:
+                if resp is not None and resp.status_code in non_retryable:
+                    return None
                 if resp is not None and resp.status_code == 429:
                     self._report(f"S2 rate limited (429). Retrying in {delay}s (attempt {attempt+1}/{max_retries})...")
                     time.sleep(delay)
                     continue
-                self._report(f"S2 request error: {e}. Retrying in {delay}s (attempt {attempt+1}/{max_retries})...")
+                self._report(f"S2 request error ({type(e).__name__}). Retrying in {delay}s (attempt {attempt+1}/{max_retries})...")
                 if attempt < max_retries - 1:
                     time.sleep(delay)
                     continue
@@ -161,7 +170,9 @@ class SemanticScholarClient:
         Updates papers in-place and returns the enriched list.
         """
         enriched = []
-        for paper in papers:
+        total = len(papers)
+        for i, paper in enumerate(papers, 1):
+            self._report(f"Enriching paper {i}/{total}: {paper.title[:60]}...")
             lookup_id = paper.s2_id or paper.paper_id
             detailed = self.get_paper_details(lookup_id)
             if detailed:
@@ -172,6 +183,7 @@ class SemanticScholarClient:
                 if detailed.s2_id:
                     paper.s2_id = detailed.s2_id
             enriched.append(paper)
+        self._report(f"Citation enrichment complete: {len(enriched)} papers enriched")
         return enriched
 
     def _parse_paper(self, item: dict) -> Optional[Paper]:

@@ -1,6 +1,7 @@
 """End-to-end pipeline orchestrator for ResearchNarrative.
 
-Chains: topic query -> paper retrieval -> embedding -> clustering -> narrative.
+Chains: topic query -> paper retrieval -> embedding -> clustering
+        -> citation graph analysis -> narrative.
 """
 
 from __future__ import annotations
@@ -15,6 +16,9 @@ from src.embeddings.embedder import PaperEmbedder
 from src.embeddings.vector_store import FAISSVectorStore
 from src.clustering.thread_discovery import ThreadDiscovery
 from src.narrative.generator import NarrativeGenerator
+from src.citation.graph import CitationGraph
+from src.citation.influence import InfluenceScorer
+from src.citation.competition import CompetitionDetector
 from src.config import PAPERS_DIR
 
 logger = logging.getLogger(__name__)
@@ -36,6 +40,9 @@ class ResearchNarrativePipeline:
         self.clusters: Optional[dict] = None
         self.cluster_labels: Optional[dict] = None
         self.narrative: Optional[str] = None
+        self.citation_graph: Optional[CitationGraph] = None
+        self.influence_scores: Optional[dict] = None
+        self.competition_analysis: Optional[dict] = None
 
     def run(
         self,
@@ -67,6 +74,9 @@ class ResearchNarrativePipeline:
         self.clusters = None
         self.cluster_labels = None
         self.narrative = None
+        self.citation_graph = None
+        self.influence_scores = None
+        self.competition_analysis = None
 
         # Step 1: Paper Ingestion
         _report("ingestion", "Collecting papers from APIs...")
@@ -117,12 +127,44 @@ class ResearchNarrativePipeline:
         labels_str = ", ".join(f'"{v}"' for k, v in self.cluster_labels.items() if k != -1)
         _report("clustering", f"Threads: {labels_str}")
 
-        # Step 5: Narrative Generation
+        # Step 5: Citation Graph Analysis
+        _report("citation_graph", "Building citation graph...")
+        self.citation_graph = CitationGraph()
+        self.citation_graph.build(papers)
+        n_edges = self.citation_graph.graph.number_of_edges()
+        _report("citation_graph", f"Citation graph: {len(papers)} nodes, {n_edges} edges")
+
+        _report("citation_graph", "Computing influence scores (PageRank, HITS, bridge, burst)...")
+        scorer = InfluenceScorer(self.citation_graph)
+        self.influence_scores = scorer.compute_all(papers)
+        top_influential = scorer.get_top_influential(5)
+        if top_influential:
+            top_names = ", ".join(
+                f'"{self.citation_graph.get_paper(pid).title[:40]}..."'
+                for pid, _ in top_influential
+                if self.citation_graph.get_paper(pid)
+            )
+            _report("citation_graph", f"Top influential: {top_names}")
+
+        paradigm_shifters = scorer.get_paradigm_shifters(papers)
+        _report("citation_graph", f"Identified {len(paradigm_shifters)} potential paradigm-shifting papers")
+
+        _report("citation_graph", "Analyzing competition and dominance between threads...")
+        detector = CompetitionDetector(self.citation_graph)
+        self.competition_analysis = detector.analyze(papers, self.clusters, self.cluster_labels)
+        n_competing = len(self.competition_analysis.get("competition_pairs", []))
+        n_complementary = len(self.competition_analysis.get("complementary_pairs", []))
+        _report("citation_graph", f"Found {n_competing} competing pairs, {n_complementary} complementary pairs")
+
+        # Step 6: Narrative Generation
         _report("narrative", "Generating research narrative...")
         self.narrative = self.narrative_gen.generate(
             topic=topic,
             clusters=self.clusters,
             cluster_labels=self.cluster_labels,
+            influence_scores=self.influence_scores,
+            competition_analysis=self.competition_analysis,
+            citation_graph=self.citation_graph,
         )
         _report("narrative", f"Narrative generated ({len(self.narrative)} characters)")
 
@@ -138,6 +180,9 @@ class ResearchNarrativePipeline:
             "narrative": self.narrative,
             "vector_store": self.vector_store,
             "umap_2d": self.thread_discovery.umap_2d,
+            "citation_graph": self.citation_graph,
+            "influence_scores": self.influence_scores,
+            "competition_analysis": self.competition_analysis,
         }
 
     def search_similar(self, query: str, top_k: int = 10) -> list[tuple[str, float]]:

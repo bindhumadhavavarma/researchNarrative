@@ -6,11 +6,12 @@ with explicit citations and multi-section organization.
 
 from __future__ import annotations
 import logging
-from typing import Optional
+from typing import Optional, Any
 
 from src.models.paper import Paper
 from src.config import LLM_TEMPERATURE, HAS_LLM
 from src.utils.llm import get_llm_client, get_model_name
+from src.citation.graph import CitationGraph
 
 logger = logging.getLogger(__name__)
 
@@ -36,22 +37,28 @@ I have organized {total_papers} papers into {num_clusters} research threads.
 
 {cluster_summaries}
 
+{citation_analysis_block}
+
 Write a research narrative with these sections:
 
 ## 1. Origins & Foundations
 Describe how this research area began. Which were the seminal papers? \
-What problems motivated the initial work?
+What problems motivated the initial work? Use the influence scores to \
+identify the most foundational papers.
 
 ## 2. Major Research Threads
 For each identified thread, explain what it investigates, key contributions, \
 and how it relates to other threads.
 
 ## 3. Competing Approaches
-Identify pairs or groups of approaches that compete or offer alternatives. \
-Explain the trade-offs.
+Use the competition analysis data provided to identify pairs or groups of \
+approaches that compete or offer alternatives. Explain the trade-offs and \
+cross-citation patterns.
 
 ## 4. Evolution & Paradigm Shifts
-Trace how dominant approaches changed over time. What caused shifts?
+Trace how dominant approaches changed over time. Highlight paradigm-shifting \
+papers (high bridge + pioneer scores). Use the dominance timeline to show \
+which threads gained or lost influence.
 
 ## 5. Current State & Open Problems
 What is the frontier right now? What problems remain unsolved?
@@ -91,6 +98,9 @@ class NarrativeGenerator:
         topic: str,
         clusters: dict[int, list[Paper]],
         cluster_labels: dict[int, str],
+        influence_scores: Optional[dict] = None,
+        competition_analysis: Optional[dict] = None,
+        citation_graph: Optional[CitationGraph] = None,
     ) -> str:
         """Generate a full research narrative.
 
@@ -98,20 +108,30 @@ class NarrativeGenerator:
             topic: The research topic.
             clusters: Mapping of cluster_id -> papers.
             cluster_labels: Mapping of cluster_id -> human-readable label.
+            influence_scores: Per-paper influence metrics from InfluenceScorer.
+            competition_analysis: Competition/complementary data from CompetitionDetector.
+            citation_graph: The CitationGraph object.
 
         Returns:
             Generated narrative as a markdown string.
         """
         if not HAS_LLM:
-            return self._generate_without_llm(topic, clusters, cluster_labels)
+            return self._generate_without_llm(
+                topic, clusters, cluster_labels, influence_scores, competition_analysis
+            )
 
-        return self._generate_with_llm(topic, clusters, cluster_labels)
+        return self._generate_with_llm(
+            topic, clusters, cluster_labels, influence_scores, competition_analysis, citation_graph
+        )
 
     def _generate_with_llm(
         self,
         topic: str,
         clusters: dict[int, list[Paper]],
         cluster_labels: dict[int, str],
+        influence_scores: Optional[dict] = None,
+        competition_analysis: Optional[dict] = None,
+        citation_graph: Optional[CitationGraph] = None,
     ) -> str:
         """Generate narrative using OpenAI API."""
         try:
@@ -127,12 +147,17 @@ class NarrativeGenerator:
                 for cid, papers in sorted(real_clusters.items())
             )
 
+            citation_block = self._build_citation_analysis_block(
+                real_clusters, influence_scores, competition_analysis, citation_graph
+            )
+
             total_papers = sum(len(p) for p in real_clusters.values())
             user_prompt = NARRATIVE_TEMPLATE.format(
                 topic=topic,
                 total_papers=total_papers,
                 num_clusters=len(real_clusters),
                 cluster_summaries=cluster_summaries,
+                citation_analysis_block=citation_block,
             )
 
             response = client.chat.completions.create(
@@ -151,13 +176,73 @@ class NarrativeGenerator:
 
         except Exception as e:
             logger.error(f"LLM narrative generation failed: {e}")
-            return self._generate_without_llm(topic, clusters, cluster_labels)
+            return self._generate_without_llm(
+                topic, clusters, cluster_labels, influence_scores, competition_analysis
+            )
+
+    def _build_citation_analysis_block(
+        self,
+        clusters: dict[int, list[Paper]],
+        influence_scores: Optional[dict],
+        competition_analysis: Optional[dict],
+        citation_graph: Optional[CitationGraph],
+    ) -> str:
+        """Build a citation analysis summary block for the LLM prompt."""
+        parts = []
+
+        if influence_scores:
+            ranked = sorted(
+                influence_scores.items(),
+                key=lambda x: x[1].get("composite", 0),
+                reverse=True,
+            )[:10]
+            lines = ["### Most Influential Papers (by composite influence score)"]
+            for pid, scores in ranked:
+                paper = citation_graph.get_paper(pid) if citation_graph else None
+                if paper:
+                    first_author = paper.authors[0].name if paper.authors else "Unknown"
+                    lines.append(
+                        f"- [{first_author}, {paper.year}] \"{paper.title}\" — "
+                        f"PageRank: {scores['pagerank']:.3f}, "
+                        f"Authority: {scores['authority']:.3f}, "
+                        f"Bridge: {scores['bridge']:.3f}, "
+                        f"Pioneer: {scores['temporal_pioneer']:.3f}, "
+                        f"Burst: {scores['citation_burst']:.3f}"
+                    )
+            parts.append("\n".join(lines))
+
+        if competition_analysis:
+            comp_pairs = competition_analysis.get("competition_pairs", [])
+            if comp_pairs:
+                lines = ["### Competing Thread Pairs"]
+                for cp in comp_pairs[:5]:
+                    lines.append(
+                        f"- \"{cp['label_a']}\" vs \"{cp['label_b']}\": "
+                        f"{cp['a_cites_b']} cross-citations A→B, "
+                        f"{cp['b_cites_a']} B→A (asymmetry: {cp['asymmetry']})"
+                    )
+                parts.append("\n".join(lines))
+
+            comp_pairs = competition_analysis.get("complementary_pairs", [])
+            if comp_pairs:
+                lines = ["### Complementary Thread Pairs"]
+                for cp in comp_pairs[:5]:
+                    lines.append(
+                        f"- \"{cp['foundation_label']}\" (foundation) → "
+                        f"\"{cp['builder_label']}\" (builds upon): "
+                        f"{cp['builder_to_foundation']} citations toward foundation"
+                    )
+                parts.append("\n".join(lines))
+
+        return "\n\n".join(parts) if parts else "(No citation graph data available)"
 
     def _generate_without_llm(
         self,
         topic: str,
         clusters: dict[int, list[Paper]],
         cluster_labels: dict[int, str],
+        influence_scores: Optional[dict] = None,
+        competition_analysis: Optional[dict] = None,
     ) -> str:
         """Generate a structured summary without LLM (template-based fallback)."""
         lines = [
@@ -168,7 +253,6 @@ class NarrativeGenerator:
             "",
         ]
 
-        # Origins
         all_papers = [p for papers in clusters.values() for p in papers]
         all_papers.sort(key=lambda p: (p.year or 9999))
 
@@ -183,7 +267,6 @@ class NarrativeGenerator:
             )
         lines.append("")
 
-        # Threads
         lines.append("## 2. Major Research Threads")
         lines.append("")
         for cid, papers in sorted(clusters.items()):
@@ -205,24 +288,64 @@ class NarrativeGenerator:
                 )
             lines.append("")
 
-        # Most cited
+        # Influential papers (use influence scores if available)
         lines.append("## 3. Most Influential Papers")
         lines.append("")
-        top_cited = sorted(all_papers, key=lambda p: -p.citation_count)[:10]
-        for i, p in enumerate(top_cited, 1):
-            first_author = p.authors[0].name if p.authors else "Unknown"
-            lines.append(
-                f"{i}. **[{first_author} et al., {p.year}]** \"{p.title}\" "
-                f"— {p.citation_count} citations (Thread: {p.cluster_label})"
-            )
+        if influence_scores:
+            ranked = sorted(
+                [(p, influence_scores.get(p.paper_id, {}).get("composite", 0)) for p in all_papers],
+                key=lambda x: -x[1],
+            )[:10]
+            for i, (p, score) in enumerate(ranked, 1):
+                first_author = p.authors[0].name if p.authors else "Unknown"
+                lines.append(
+                    f"{i}. **[{first_author} et al., {p.year}]** \"{p.title}\" "
+                    f"— Influence: {score:.3f}, Citations: {p.citation_count} "
+                    f"(Thread: {p.cluster_label})"
+                )
+        else:
+            top_cited = sorted(all_papers, key=lambda p: -p.citation_count)[:10]
+            for i, p in enumerate(top_cited, 1):
+                first_author = p.authors[0].name if p.authors else "Unknown"
+                lines.append(
+                    f"{i}. **[{first_author} et al., {p.year}]** \"{p.title}\" "
+                    f"— {p.citation_count} citations (Thread: {p.cluster_label})"
+                )
         lines.append("")
 
+        # Competition section
+        if competition_analysis:
+            comp_pairs = competition_analysis.get("competition_pairs", [])
+            complementary = competition_analysis.get("complementary_pairs", [])
+
+            if comp_pairs:
+                lines.append("## 4. Competing Approaches")
+                lines.append("")
+                for cp in comp_pairs[:5]:
+                    lines.append(
+                        f"- **\"{cp['label_a']}\"** vs **\"{cp['label_b']}\"** — "
+                        f"{cp['total_cross_citations']} cross-citations "
+                        f"(asymmetry: {cp['asymmetry']})"
+                    )
+                lines.append("")
+
+            if complementary:
+                lines.append("## 5. Complementary Threads")
+                lines.append("")
+                for cp in complementary[:5]:
+                    lines.append(
+                        f"- **\"{cp['foundation_label']}\"** → **\"{cp['builder_label']}\"** — "
+                        f"The latter builds on the former ({cp['builder_to_foundation']} citations)"
+                    )
+                lines.append("")
+
         # Timeline
-        lines.append("## 4. Timeline")
+        lines.append("## 6. Timeline")
         lines.append("")
-        if years:
+        all_years = [p.year for p in all_papers if p.year]
+        if all_years:
             from collections import Counter
-            year_counts = Counter(p.year for p in all_papers if p.year)
+            year_counts = Counter(all_years)
             for year in sorted(year_counts.keys()):
                 lines.append(f"- **{year}**: {year_counts[year]} papers")
         lines.append("")
