@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 S2_API_BASE = "https://api.semanticscholar.org/graph/v1"
 S2_SEARCH_URL = f"{S2_API_BASE}/paper/search"
 S2_PAPER_URL = f"{S2_API_BASE}/paper"
+S2_BATCH_URL = f"{S2_API_BASE}/paper/batch"
 S2_PAPER_FIELDS = (
     "paperId,externalIds,title,abstract,year,venue,"
     "citationCount,influentialCitationCount,"
@@ -165,26 +166,107 @@ class SemanticScholarClient:
         return self._parse_paper_with_citations(data)
 
     def get_citations_batch(self, papers: list[Paper], max_per_paper: int = 100) -> list[Paper]:
-        """Enrich a list of papers with their references and citation data.
+        """Enrich papers with references and citation data using the S2 batch API.
 
-        Updates papers in-place and returns the enriched list.
+        Uses POST /paper/batch to fetch up to 500 papers per request,
+        dramatically faster than individual GET calls.
         """
-        enriched = []
-        total = len(papers)
-        for i, paper in enumerate(papers, 1):
-            self._report(f"Enriching paper {i}/{total}: {paper.title[:60]}...")
-            lookup_id = paper.s2_id or paper.paper_id
-            detailed = self.get_paper_details(lookup_id)
-            if detailed:
-                paper.references = detailed.references
-                paper.cited_by = detailed.cited_by[:max_per_paper]
-                paper.citation_count = detailed.citation_count
-                paper.influential_citation_count = detailed.influential_citation_count
-                if detailed.s2_id:
-                    paper.s2_id = detailed.s2_id
-            enriched.append(paper)
-        self._report(f"Citation enrichment complete: {len(enriched)} papers enriched")
-        return enriched
+        # Build lookup: s2_id -> paper (for matching responses back)
+        id_to_paper: dict[str, Paper] = {}
+        batch_ids: list[str] = []
+        for p in papers:
+            lookup_id = p.s2_id if p.s2_id else None
+            if lookup_id:
+                id_to_paper[lookup_id] = p
+                batch_ids.append(lookup_id)
+
+        if not batch_ids:
+            self._report("No S2 IDs available for batch enrichment — skipping")
+            return papers
+
+        BATCH_SIZE = 500
+        total_batches = (len(batch_ids) + BATCH_SIZE - 1) // BATCH_SIZE
+        enriched_count = 0
+
+        for batch_num in range(total_batches):
+            start = batch_num * BATCH_SIZE
+            end = min(start + BATCH_SIZE, len(batch_ids))
+            chunk = batch_ids[start:end]
+
+            self._report(
+                f"Batch enrichment {batch_num + 1}/{total_batches}: "
+                f"fetching {len(chunk)} papers ({start + 1}–{end} of {len(batch_ids)})..."
+            )
+
+            data = self._post_batch(chunk)
+            if not data:
+                self._report(f"Batch {batch_num + 1} failed — skipping this chunk")
+                continue
+
+            for item in data:
+                if not item:
+                    continue
+                s2_id = item.get("paperId")
+                if not s2_id or s2_id not in id_to_paper:
+                    continue
+
+                paper = id_to_paper[s2_id]
+
+                refs_raw = item.get("references") or []
+                paper.references = [r["paperId"] for r in refs_raw if r.get("paperId")]
+
+                cites_raw = item.get("citations") or []
+                paper.cited_by = [c["paperId"] for c in cites_raw if c.get("paperId")][:max_per_paper]
+
+                paper.citation_count = item.get("citationCount", paper.citation_count) or paper.citation_count
+                paper.influential_citation_count = (
+                    item.get("influentialCitationCount", paper.influential_citation_count)
+                    or paper.influential_citation_count
+                )
+                enriched_count += 1
+
+        self._report(f"Citation enrichment complete: {enriched_count}/{len(papers)} papers enriched via batch API")
+        return papers
+
+    def _post_batch(self, paper_ids: list[str]) -> Optional[list[dict]]:
+        """POST to /paper/batch to fetch multiple papers in one request."""
+        max_retries = 5
+        delay = 5
+        non_retryable = {400, 403, 404, 405, 410}
+        resp = None
+
+        for attempt in range(max_retries):
+            self._wait()
+            try:
+                resp = self.session.post(
+                    S2_BATCH_URL,
+                    params={"fields": S2_PAPER_FIELDS},
+                    json={"ids": paper_ids},
+                    timeout=60,
+                )
+                if resp.status_code in non_retryable:
+                    logger.debug(f"S2 batch returned {resp.status_code} — skipping")
+                    return None
+                if resp.status_code == 429:
+                    self._report(f"S2 batch rate limited (429). Retrying in {delay}s (attempt {attempt + 1}/{max_retries})...")
+                    time.sleep(delay)
+                    continue
+                resp.raise_for_status()
+                return resp.json()
+            except requests.RequestException as e:
+                if resp is not None and resp.status_code in non_retryable:
+                    return None
+                if resp is not None and resp.status_code == 429:
+                    self._report(f"S2 batch rate limited (429). Retrying in {delay}s (attempt {attempt + 1}/{max_retries})...")
+                    time.sleep(delay)
+                    continue
+                self._report(f"S2 batch request error ({type(e).__name__}). Retrying in {delay}s (attempt {attempt + 1}/{max_retries})...")
+                if attempt < max_retries - 1:
+                    time.sleep(delay)
+                    continue
+                return None
+        self._report(f"S2 batch request failed after {max_retries} attempts — skipping")
+        return None
 
     def _parse_paper(self, item: dict) -> Optional[Paper]:
         try:

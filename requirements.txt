@@ -39,3 +39,4 @@ networkx>=3.2.0
 
 # Utilities
 tenacity>=8.2.0
+markdown>=3.5.0

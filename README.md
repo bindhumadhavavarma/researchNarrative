@@ -45,9 +45,9 @@ Topic Query
          │
          ▼
 ┌───────────────────┐
-│  RAG Narrative     │  Citation-graph-augmented prompts
-│  (src/narrative/)  │  Influence & competition context
-│                    │  Multi-section output
+│  RAG Narrative     │  Chunked generation + synthesis
+│  (src/narrative/)  │  Citation verification
+│                    │  Per-thread deep-dives + HTML export
 └────────┬──────────┘
          │
          ▼
@@ -180,6 +180,14 @@ CS6235_ResearchNarrative/
   - Citation Analysis dashboard tab (Sankey, radar, area charts)
   - S2 API key integration with full citation enrichment
   - Citation-graph-augmented RAG narratives
+- **CP4 (RAG Narrative Engine)** — Completed
+  - Production-grade chunked narrative generation (section-by-section + synthesis)
+  - 5 section-specific prompt templates with curated paper selection
+  - Citation verification system (regex extraction + surname/year matching)
+  - Citation-linked narrative display (clickable paper references)
+  - Per-thread deep-dive narratives
+  - HTML export with styled typography
+  - Citation accuracy badge (High/Medium/Low)
 
 ## Author
 

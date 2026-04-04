@@ -158,6 +158,10 @@ class ResearchNarrativePipeline:
 
         # Step 6: Narrative Generation
         _report("narrative", "Generating research narrative...")
+
+        def _narrative_progress(msg):
+            _report("narrative", msg)
+
         self.narrative = self.narrative_gen.generate(
             topic=topic,
             clusters=self.clusters,
@@ -165,6 +169,7 @@ class ResearchNarrativePipeline:
             influence_scores=self.influence_scores,
             competition_analysis=self.competition_analysis,
             citation_graph=self.citation_graph,
+            progress_callback=_narrative_progress,
         )
         _report("narrative", f"Narrative generated ({len(self.narrative)} characters)")
 
@@ -183,6 +188,8 @@ class ResearchNarrativePipeline:
             "citation_graph": self.citation_graph,
             "influence_scores": self.influence_scores,
             "competition_analysis": self.competition_analysis,
+            "citation_verification": self.narrative_gen.verification_result,
+            "thread_narratives": self.narrative_gen.thread_narratives,
         }
 
     def search_similar(self, query: str, top_k: int = 10) -> list[tuple[str, float]]:
