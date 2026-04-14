@@ -19,6 +19,7 @@ from src.narrative.generator import NarrativeGenerator
 from src.citation.graph import CitationGraph
 from src.citation.influence import InfluenceScorer
 from src.citation.competition import CompetitionDetector
+from src.evaluation.metrics import PipelineEvaluator
 from src.config import PAPERS_DIR
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,7 @@ class ResearchNarrativePipeline:
         self.vector_store = FAISSVectorStore()
         self.thread_discovery = ThreadDiscovery()
         self.narrative_gen = NarrativeGenerator()
+        self.evaluator = PipelineEvaluator()
 
         # State
         self.collection: Optional[PaperCollection] = None
@@ -43,6 +45,7 @@ class ResearchNarrativePipeline:
         self.citation_graph: Optional[CitationGraph] = None
         self.influence_scores: Optional[dict] = None
         self.competition_analysis: Optional[dict] = None
+        self.evaluation_results: Optional[dict] = None
 
     def run(
         self,
@@ -77,6 +80,7 @@ class ResearchNarrativePipeline:
         self.citation_graph = None
         self.influence_scores = None
         self.competition_analysis = None
+        self.evaluation_results = None
 
         # Step 1: Paper Ingestion
         _report("ingestion", "Collecting papers from APIs...")
@@ -173,6 +177,22 @@ class ResearchNarrativePipeline:
         )
         _report("narrative", f"Narrative generated ({len(self.narrative)} characters)")
 
+        # Step 7: Evaluation
+        _report("evaluation", "Running automated evaluation metrics...")
+        self.evaluation_results = self.evaluator.evaluate_all(
+            papers=papers,
+            embeddings=self.embeddings,
+            clusters=self.clusters,
+            cluster_labels=self.cluster_labels,
+            narrative=self.narrative,
+            citation_verification=self.narrative_gen.verification_result,
+            influence_scores=self.influence_scores,
+            citation_graph=self.citation_graph,
+        )
+        grade = self.evaluator.get_grade()
+        overall = self.evaluation_results.get("overall", {}).get("score", 0)
+        _report("evaluation", f"Evaluation complete — Grade: {grade} (score: {overall:.3f})")
+
         _report("done", "Pipeline complete!")
 
         return {
@@ -190,6 +210,7 @@ class ResearchNarrativePipeline:
             "competition_analysis": self.competition_analysis,
             "citation_verification": self.narrative_gen.verification_result,
             "thread_narratives": self.narrative_gen.thread_narratives,
+            "evaluation": self.evaluation_results,
         }
 
     def search_similar(self, query: str, top_k: int = 10) -> list[tuple[str, float]]:

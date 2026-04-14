@@ -13,7 +13,7 @@ Topic Query
     │
     ▼
 ┌───────────────────┐
-│  Paper Ingestion   │  arXiv API + Semantic Scholar API
+│  Paper Ingestion   │  arXiv API + S2 Batch API
 │  (src/api/)        │  → Unified paper schema
 └────────┬──────────┘
          │
@@ -52,9 +52,16 @@ Topic Query
          │
          ▼
 ┌───────────────────┐
+│  Evaluation        │  Silhouette, Davies-Bouldin
+│  (src/evaluation/) │  Citation coverage & accuracy
+│                    │  Quality grading system
+└────────┬──────────┘
+         │
+         ▼
+┌───────────────────┐
 │  Dashboard         │  Streamlit interactive UI
 │  (app.py)          │  Plotly visualizations
-│                    │  6 tabs + citation analysis
+│                    │  7 tabs + evaluation metrics
 └───────────────────┘
 ```
 
@@ -104,10 +111,11 @@ Open `http://localhost:8501` in your browser.
    - Generate SPECTER embeddings
    - Cluster papers into research threads
    - Generate a structured narrative
-4. **Explore results** across six tabs:
-   - **Narrative** — Full research storyline with citations
+4. **Explore results** across seven tabs:
+   - **Narrative** — Full research storyline with citations and export
    - **Clusters** — UMAP visualization and thread details
    - **Citation Analysis** — Influence scores, competition detection, dominance tracking
+   - **Evaluation** — Quality metrics, grading, and recommendations
    - **Timeline** — Publication and citation trends over time
    - **Papers** — Browsable, filterable paper list
    - **Search** — Semantic similarity search
@@ -139,6 +147,8 @@ CS6235_ResearchNarrative/
 │   │   └── competition.py        # Competition & dominance detection
 │   ├── narrative/
 │   │   └── generator.py          # RAG narrative generation
+│   ├── evaluation/
+│   │   └── metrics.py            # Pipeline quality evaluation
 ├── data/
 │   ├── papers/                   # Cached paper collections (JSON)
 │   ├── embeddings/               # Cached embedding arrays
@@ -157,6 +167,7 @@ CS6235_ResearchNarrative/
 | Clustering | UMAP + HDBSCAN |
 | Citation Graph | NetworkX (PageRank, HITS, bridge scoring) |
 | Narrative Gen | Azure OpenAI GPT-4o via citation-augmented prompts |
+| Evaluation | scikit-learn (silhouette, Davies-Bouldin) |
 | Dashboard | Streamlit + Plotly (Sankey, radar, area charts) |
 | Language | Python 3.10+ |
 
@@ -188,6 +199,13 @@ CS6235_ResearchNarrative/
   - Per-thread deep-dive narratives
   - HTML export with styled typography
   - Citation accuracy badge (High/Medium/Low)
+- **CP5 (Final Delivery)** — Completed
+  - Automated evaluation framework (silhouette, Davies-Bouldin, citation coverage, narrative quality)
+  - Quality grading system (A+ through D) with actionable recommendations
+  - Evaluation dashboard tab (radar chart, score gauges, detailed metrics)
+  - Full report HTML export (narrative + evaluation + stats)
+  - 7 interactive dashboard tabs
+  - Comprehensive documentation and final report with skills learning
 
 ## Author
 

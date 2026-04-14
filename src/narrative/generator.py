@@ -291,19 +291,16 @@ class NarrativeGenerator:
         real_clusters = {cid: ps for cid, ps in clusters.items() if cid != -1}
         total_papers = sum(len(ps) for ps in real_clusters.values())
 
-        if total_papers <= MAX_NARRATIVE_PAPERS and len(real_clusters) <= 6:
-            _report("Generating narrative (single-pass mode)...")
-            narrative = self._generate_single_pass(
-                topic, clusters, cluster_labels,
-                influence_scores, competition_analysis, citation_graph
-            )
-        else:
-            _report(f"Large corpus ({total_papers} papers, {len(real_clusters)} threads) — using chunked generation...")
-            narrative = self._generate_chunked(
-                topic, clusters, cluster_labels,
-                influence_scores, competition_analysis, citation_graph,
-                _report,
-            )
+        _report(f"Generating narrative for {total_papers} papers across {len(real_clusters)} threads (single-request)...")
+        narrative = self._generate_single_pass(
+            topic, clusters, cluster_labels,
+            influence_scores, competition_analysis, citation_graph
+        )
+
+        _report("Generating thread deep-dives (single-request)...")
+        self._generate_all_thread_narratives(
+            real_clusters, cluster_labels, influence_scores, _report
+        )
 
         _report("Verifying citations against paper database...")
         self.verification_result = self.verifier.verify(narrative)
@@ -383,7 +380,7 @@ class NarrativeGenerator:
         competition_analysis: Optional[dict],
         citation_graph: Optional[CitationGraph],
     ) -> str:
-        """Generate entire narrative in a single LLM call (small corpora)."""
+        """Generate entire narrative in a single LLM call."""
         try:
             client = get_llm_client()
             model = get_model_name()
@@ -399,12 +396,15 @@ class NarrativeGenerator:
                 real_clusters, influence_scores, competition_analysis, citation_graph
             )
 
+            dominance_block = self._build_dominance_block(competition_analysis)
+
             total_papers = sum(len(ps) for ps in real_clusters.values())
             user_prompt = (
                 f'Generate a structured research narrative for the topic: "{topic}"\n\n'
                 f"I have organized {total_papers} papers into {len(real_clusters)} research threads.\n\n"
                 f"{cluster_summaries}\n\n{citation_block}\n\n"
-                "Write a research narrative with these sections:\n\n"
+                f"Thread dominance over time:\n{dominance_block}\n\n"
+                "Write a comprehensive research narrative with these sections:\n\n"
                 "## 1. Origins & Foundations\n"
                 "Describe how this research area began. Which were the seminal papers? "
                 "What problems motivated the initial work? Use the influence scores to "
@@ -420,7 +420,7 @@ class NarrativeGenerator:
                 "## 5. Current State & Open Problems\n"
                 "What is the frontier right now? What problems remain unsolved?\n\n"
                 "IMPORTANT: Cite papers as [Author et al., Year] throughout. "
-                "Use ONLY the papers provided above."
+                "Use ONLY the papers provided above. Write at least 3-4 paragraphs per section."
             )
 
             response = client.chat.completions.create(
@@ -430,7 +430,7 @@ class NarrativeGenerator:
                     {"role": "system", "content": NARRATIVE_SYSTEM_PROMPT},
                     {"role": "user", "content": user_prompt},
                 ],
-                max_tokens=4096,
+                max_tokens=6000,
             )
             return response.choices[0].message.content
 
@@ -440,120 +440,92 @@ class NarrativeGenerator:
                 topic, clusters, cluster_labels, influence_scores, competition_analysis
             )
 
-    def _generate_chunked(
+    def _generate_all_thread_narratives(
         self,
-        topic: str,
         clusters: dict[int, list[Paper]],
         cluster_labels: dict[int, str],
         influence_scores: Optional[dict],
-        competition_analysis: Optional[dict],
-        citation_graph: Optional[CitationGraph],
         report: callable,
-    ) -> str:
-        """Generate narrative in chunks (one section at a time) then synthesize."""
+    ) -> None:
+        """Generate all thread deep-dive narratives in a single LLM call."""
+        if not HAS_LLM:
+            for cid, ps in sorted(clusters.items()):
+                label = cluster_labels.get(cid, f"Thread {cid}")
+                self.thread_narratives[cid] = self._thread_summary_fallback(label, ps)
+            return
+
         try:
             client = get_llm_client()
             model = get_model_name()
-            real_clusters = {cid: ps for cid, ps in clusters.items() if cid != -1}
-            all_papers = [p for ps in real_clusters.values() for p in ps]
 
-            sections = {}
-
-            # Section 1: Origins & Foundations
-            report("Generating section 1/5: Origins & Foundations...")
-            foundational = self._get_foundational_papers(all_papers, influence_scores)
-            influence_block = self._build_influence_block(foundational, influence_scores)
-            prompt_origins = SECTION_ORIGINS.format(
-                topic=topic,
-                papers_block=_format_papers_block(foundational, 20),
-                influence_block=influence_block,
-            )
-            sections["origins"] = self._llm_call(client, model, prompt_origins)
-
-            # Section 2: Major Research Threads
-            report("Generating section 2/5: Major Research Threads...")
-            threads_block = "\n\n".join(
-                self._build_thread_block(cid, cluster_labels.get(cid, f"Thread {cid}"), ps)
-                for cid, ps in sorted(real_clusters.items())
-            )
-            prompt_threads = SECTION_THREADS.format(
-                topic=topic,
-                threads_block=threads_block,
-            )
-            sections["threads"] = self._llm_call(client, model, prompt_threads)
-
-            # Section 3: Competing Approaches
-            report("Generating section 3/5: Competing Approaches...")
-            competition_block = self._build_competition_block(competition_analysis)
-            competition_papers = self._get_competition_papers(real_clusters, competition_analysis)
-            prompt_competition = SECTION_COMPETITION.format(
-                topic=topic,
-                competition_block=competition_block,
-                papers_block=_format_papers_block(competition_papers, 20),
-            )
-            sections["competition"] = self._llm_call(client, model, prompt_competition)
-
-            # Section 4: Evolution & Paradigm Shifts
-            report("Generating section 4/5: Evolution & Paradigm Shifts...")
-            dominance_block = self._build_dominance_block(competition_analysis)
-            shifters = self._get_paradigm_shifters(all_papers, influence_scores)
-            shifters_block = _format_papers_block(shifters, 10) if shifters else "(No paradigm-shifting papers identified)"
-            prompt_evolution = SECTION_EVOLUTION.format(
-                topic=topic,
-                dominance_block=dominance_block,
-                shifters_block=shifters_block,
-            )
-            sections["evolution"] = self._llm_call(client, model, prompt_evolution)
-
-            # Section 5: Current State & Open Problems
-            report("Generating section 5/5: Current State & Open Problems...")
-            recent = self._get_recent_papers(all_papers, influence_scores)
-            prompt_frontier = SECTION_FRONTIER.format(
-                topic=topic,
-                papers_block=_format_papers_block(recent, 20),
-            )
-            sections["frontier"] = self._llm_call(client, model, prompt_frontier)
-
-            # Synthesis
-            report("Synthesizing sections into cohesive narrative...")
-            combined = "\n\n---\n\n".join(
-                f"### {name.upper()}\n{text}"
-                for name, text in sections.items()
-            )
-            prompt_synthesis = SYNTHESIS_PROMPT.format(
-                topic=topic,
-                sections=combined,
-            )
-            narrative = self._llm_call(client, model, prompt_synthesis, max_tokens=6000)
-
-            # Generate per-thread narratives for the dashboard
-            for cid, ps in sorted(real_clusters.items()):
+            thread_blocks = []
+            cid_order = sorted(clusters.keys())
+            for cid in cid_order:
+                ps = clusters[cid]
                 label = cluster_labels.get(cid, f"Thread {cid}")
-                report(f"Generating thread narrative: {label}...")
-                self.thread_narratives[cid] = self.generate_thread_narrative(
-                    label, ps, influence_scores
+                sorted_papers = sorted(ps, key=lambda p: (p.year or 0))
+                paper_block = _format_papers_block(sorted_papers, max_papers=15)
+
+                inf_lines = ""
+                if influence_scores:
+                    ranked = sorted(
+                        ps,
+                        key=lambda p: influence_scores.get(p.paper_id, {}).get("composite", 0),
+                        reverse=True,
+                    )[:3]
+                    inf_parts = []
+                    for p in ranked:
+                        scores = influence_scores.get(p.paper_id, {})
+                        first_author = p.authors[0].name if p.authors else "Unknown"
+                        inf_parts.append(
+                            f"  - [{first_author}, {p.year}]: composite={scores.get('composite', 0):.3f}"
+                        )
+                    if inf_parts:
+                        inf_lines = "\nMost influential:\n" + "\n".join(inf_parts)
+
+                thread_blocks.append(
+                    f"### THREAD {cid}: {label} ({len(ps)} papers)\n"
+                    f"{paper_block}{inf_lines}"
                 )
 
-            return narrative
-
-        except Exception as e:
-            logger.error(f"Chunked generation failed: {e}")
-            return self._generate_without_llm(
-                topic, clusters, cluster_labels, influence_scores, competition_analysis
+            all_threads = "\n\n---\n\n".join(thread_blocks)
+            prompt = (
+                f"Write a focused deep-dive narrative for EACH of the following {len(cid_order)} "
+                f"research threads. For each thread, write 2-3 paragraphs covering:\n"
+                f"(1) how the thread started, (2) key advances, (3) current state.\n\n"
+                f"Separate each thread narrative with a line containing only: "
+                f"===THREAD_SEPARATOR===\n\n"
+                f"Output them in the SAME ORDER as listed below. "
+                f"Cite papers as [Author et al., Year].\n\n{all_threads}"
             )
 
-    def _llm_call(self, client, model: str, prompt: str, max_tokens: int = 2500) -> str:
-        """Make a single LLM call with the narrative system prompt."""
-        response = client.chat.completions.create(
-            model=model,
-            temperature=LLM_TEMPERATURE,
-            messages=[
-                {"role": "system", "content": NARRATIVE_SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ],
-            max_tokens=max_tokens,
-        )
-        return response.choices[0].message.content
+            response = client.chat.completions.create(
+                model=model,
+                temperature=LLM_TEMPERATURE,
+                messages=[
+                    {"role": "system", "content": NARRATIVE_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=5000,
+            )
+            result = response.choices[0].message.content
+
+            parts = [p.strip() for p in result.split("===THREAD_SEPARATOR===") if p.strip()]
+
+            for i, cid in enumerate(cid_order):
+                if i < len(parts):
+                    self.thread_narratives[cid] = parts[i]
+                else:
+                    label = cluster_labels.get(cid, f"Thread {cid}")
+                    self.thread_narratives[cid] = self._thread_summary_fallback(label, clusters[cid])
+
+            report(f"Generated {len(self.thread_narratives)} thread narratives")
+
+        except Exception as e:
+            logger.error(f"Batch thread narrative generation failed: {e}")
+            for cid, ps in sorted(clusters.items()):
+                label = cluster_labels.get(cid, f"Thread {cid}")
+                self.thread_narratives[cid] = self._thread_summary_fallback(label, ps)
 
     def _build_thread_block(self, cid: int, label: str, papers: list[Paper]) -> str:
         """Build a summary block for one thread."""

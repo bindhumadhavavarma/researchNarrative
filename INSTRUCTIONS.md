@@ -42,12 +42,14 @@ CS6235_ResearchNarrative/
 │   │   └── vector_store.py             # FAISS index management
 │   ├── clustering/
 │   │   └── thread_discovery.py         # UMAP + HDBSCAN + LLM labeling
-│   ├── citation/                       # NEW in CP3
+│   ├── citation/
 │   │   ├── graph.py                    # NetworkX citation graph construction
 │   │   ├── influence.py                # PageRank, HITS, bridge, pioneer, burst scoring
 │   │   └── competition.py             # Competition detection + dominance tracking
 │   ├── narrative/
 │   │   └── generator.py                # RAG narrative generation (citation-augmented)
+│   ├── evaluation/
+│   │   └── metrics.py                  # Pipeline quality evaluation (silhouette, DB, etc.)
 │   └── utils/
 │       └── llm.py                      # LLM client factory (Azure/OpenAI)
 ├── data/
@@ -130,7 +132,7 @@ This opens the dashboard at `http://localhost:8501`.
    - UMAP + HDBSCAN clustering
    - LLM-based cluster labeling
    - RAG narrative generation
-5. Explore results across 6 tabs: Narrative, Clusters, Citation Analysis, Timeline, Papers, Search
+5. Explore results across 7 tabs: Narrative, Clusters, Citation Analysis, Evaluation, Timeline, Papers, Search
 
 ### Programmatic Usage
 
@@ -152,6 +154,7 @@ narrative = results["narrative"]                 # str (markdown)
 citation_graph = results["citation_graph"]       # CitationGraph
 influence_scores = results["influence_scores"]   # dict[str, dict[str, float]]
 competition = results["competition_analysis"]    # dict with competition_pairs, etc.
+evaluation = results["evaluation"]               # dict with retrieval, clustering, etc.
 ```
 
 ## Test
@@ -265,8 +268,17 @@ User Query (topic string)
            │
            ▼
 ┌─────────────────────────┐
-│ Streamlit Dashboard      │    6 tabs: Narrative, Clusters, Citation
-│  └─ Plotly + custom CSS  │    Analysis, Timeline, Papers, Search
+│ PipelineEvaluator        │
+│  ├─ Silhouette score     │    Clustering quality assessment
+│  ├─ Citation coverage    │    Graph connectivity metrics
+│  └─ Narrative quality    │    Citation density & accuracy
+└──────────┬──────────────┘
+           │
+           ▼
+┌─────────────────────────┐
+│ Streamlit Dashboard      │    7 tabs: Narrative, Clusters, Citation
+│  └─ Plotly + custom CSS  │    Analysis, Evaluation, Timeline,
+│                          │    Papers, Search
 └─────────────────────────┘
 ```
 
