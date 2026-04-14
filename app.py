@@ -135,7 +135,7 @@ if "running" not in st.session_state:
 # ── Sidebar ──────────────────────────────────────────────────────────────────
 
 with st.sidebar:
-    st.markdown("## 🔬 ResearchNarrative")
+    st.markdown("## ResearchNarrative")
     st.markdown("*RAG-Based Research Storyline Engine*")
     st.divider()
 
@@ -173,7 +173,7 @@ with st.sidebar:
         ]
     if cached_topics:
         st.divider()
-        st.markdown("**📁 Cached Topics**")
+        st.markdown("**Cached Topics**")
         for ct in cached_topics:
             if st.button(f"Load: {ct}", key=f"load_{ct}"):
                 topic = ct
@@ -181,14 +181,14 @@ with st.sidebar:
 
     st.divider()
     run_button = st.button(
-        "🚀 Analyze Topic",
+        "Analyze Topic",
         type="primary",
         use_container_width=True,
         disabled=not topic,
     )
 
     st.divider()
-    with st.expander("ℹ️ About", expanded=False):
+    with st.expander("About", expanded=False):
         st.markdown(
             "**ResearchNarrative** transforms academic paper search into "
             "structured research storylines.\n\n"
@@ -202,7 +202,7 @@ with st.sidebar:
 
 # ── Main Content ─────────────────────────────────────────────────────────────
 
-st.markdown('<div class="main-header">📚 ResearchNarrative</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-header">ResearchNarrative</div>', unsafe_allow_html=True)
 st.markdown(
     '<div class="sub-header">'
     'Transform academic literature into structured research storylines'
@@ -215,9 +215,9 @@ if run_button and topic:
     st.session_state.running = True
 
     step_icons = {
-        "init": "🚀", "ingestion": "📥", "embedding": "🧠",
-        "indexing": "📇", "clustering": "🧩", "citation_graph": "🔗",
-        "narrative": "📖", "evaluation": "📊", "done": "✅",
+        "init": "", "ingestion": "", "embedding": "",
+        "indexing": "", "clustering": "", "citation_graph": "",
+        "narrative": "", "evaluation": "", "done": "",
     }
     step_labels = {
         "init": "Initializing", "ingestion": "Collecting Papers",
@@ -251,14 +251,14 @@ if run_button and topic:
         )
 
     def on_progress(step: str, message: str):
-        icon = step_icons.get(step, "⏳")
+        icon = step_icons.get(step, "")
         label = step_labels.get(step, step)
         current_step[0] = step
         log_lines.append((icon, label, message))
-        header = f"{icon} {label} — {message}"
+        header = f"{label} — {message}"
         _render_card(header, log_lines[-20:])
 
-    _render_card("🚀 Starting pipeline...", [])
+    _render_card("Starting pipeline...", [])
 
     try:
         skip = hasattr(st.session_state, "load_cached")
@@ -276,10 +276,10 @@ if run_button and topic:
         st.session_state.results = results
         if hasattr(st.session_state, "load_cached"):
             del st.session_state.load_cached
-        _render_card("✅ Pipeline complete!", log_lines[-20:], "progress-card-done")
+        _render_card("Pipeline complete!", log_lines[-20:], "progress-card-done")
     except Exception as e:
-        log_lines.append(("❌", "Error", str(e)))
-        _render_card(f"❌ Pipeline failed: {e}", log_lines[-20:], "progress-card-error")
+        log_lines.append(("", "Error", str(e)))
+        _render_card(f"Pipeline failed: {e}", log_lines[-20:], "progress-card-error")
         st.session_state.running = False
 
 # Display results
@@ -501,8 +501,8 @@ CS 6235: IEC — Georgia Institute of Technology
 # ── Tabs ─────────────────────────────────────────────────────────────────────
 
 tab_narrative, tab_clusters, tab_citations, tab_eval, tab_timeline, tab_papers, tab_search = st.tabs([
-    "📖 Narrative", "🧩 Clusters", "🔗 Citation Analysis", "📊 Evaluation",
-    "📅 Timeline", "📄 Papers", "🔍 Search",
+    "Narrative", "Clusters", "Citation Analysis", "Evaluation",
+    "Timeline", "Papers", "Search",
 ])
 
 # ── Tab 1: Narrative ─────────────────────────────────────────────────────────
@@ -529,7 +529,7 @@ with tab_narrative:
                 f'<div style="display:inline-flex;align-items:center;gap:8px;margin-bottom:1rem;">'
                 f'<span style="background:{badge_color};color:white;padding:3px 10px;'
                 f'border-radius:12px;font-size:0.8rem;font-weight:600;">'
-                f'✓ Citation Accuracy: {badge_label} ({accuracy_pct:.0f}%)</span>'
+                f'Citation Accuracy: {badge_label} ({accuracy_pct:.0f}%)</span>'
                 f'<span style="color:#aaa;font-size:0.8rem;">'
                 f'{stats["verified_count"]}/{stats["total"]} citations verified against paper database</span>'
                 f'</div>',
@@ -546,7 +546,7 @@ with tab_narrative:
 
     # Unverified citations warning
     if verification and verification["unverified"]:
-        with st.expander(f"⚠️ {len(verification['unverified'])} unverified citations"):
+        with st.expander(f"{len(verification['unverified'])} unverified citations"):
             st.markdown(
                 "These citations in the narrative could not be matched to papers "
                 "in the retrieved collection. They may reference papers outside the "
@@ -563,7 +563,7 @@ with tab_narrative:
         st.markdown("### Thread Deep-Dives")
         for cid in sorted(thread_narratives.keys()):
             label = cluster_labels.get(cid, f"Thread {cid}")
-            with st.expander(f"📖 Thread {cid}: {label}"):
+            with st.expander(f"Thread {cid}: {label}"):
                 thread_text = thread_narratives[cid]
                 if pipeline.narrative_gen.verifier:
                     thread_text = pipeline.narrative_gen.verifier.add_paper_links(thread_text)
@@ -574,7 +574,7 @@ with tab_narrative:
     dl_col1, dl_col2, dl_col3 = st.columns(3)
     with dl_col1:
         st.download_button(
-            "📥 Download (Markdown)",
+            "Download (Markdown)",
             data=narrative,
             file_name=f"narrative_{results['topic'].replace(' ', '_')}.md",
             mime="text/markdown",
@@ -582,7 +582,7 @@ with tab_narrative:
     with dl_col2:
         html_narrative = _build_html_export(results['topic'], narrative, verification, thread_narratives, cluster_labels)
         st.download_button(
-            "📥 Download (HTML)",
+            "Download (HTML)",
             data=html_narrative,
             file_name=f"narrative_{results['topic'].replace(' ', '_')}.html",
             mime="text/html",
@@ -590,7 +590,7 @@ with tab_narrative:
     with dl_col3:
         full_report = _build_full_report_html(results, cluster_labels)
         st.download_button(
-            "📥 Full Report (HTML)",
+            "Full Report (HTML)",
             data=full_report,
             file_name=f"report_{results['topic'].replace(' ', '_')}.html",
             mime="text/html",
@@ -891,10 +891,10 @@ with tab_eval:
         st.markdown("### Component Scores")
         gauge_cols = st.columns(4)
         component_labels = {
-            "retrieval": ("📥 Retrieval", "Paper collection quality"),
-            "clustering": ("🧩 Clustering", "Thread separation quality"),
-            "citation_graph": ("🔗 Citation Graph", "Graph connectivity"),
-            "narrative": ("📖 Narrative", "Generated text quality"),
+            "retrieval": ("Retrieval", "Paper collection quality"),
+            "clustering": ("Clustering", "Thread separation quality"),
+            "citation_graph": ("Citation Graph", "Graph connectivity"),
+            "narrative": ("Narrative", "Generated text quality"),
         }
         for i, (key, (label, desc)) in enumerate(component_labels.items()):
             with gauge_cols[i]:
