@@ -15,6 +15,13 @@ from src.config import PAPERS_DIR, SEMANTIC_SCHOLAR_API_KEY
 
 logger = logging.getLogger(__name__)
 
+_HAS_SCHOLARLY = False
+try:
+    from src.api.google_scholar_client import GoogleScholarClient
+    _HAS_SCHOLARLY = True
+except Exception:
+    pass
+
 
 class PaperIngestionPipeline:
     """Orchestrates paper retrieval from multiple sources."""
@@ -22,6 +29,7 @@ class PaperIngestionPipeline:
     def __init__(self):
         self.arxiv = ArxivClient()
         self.s2 = SemanticScholarClient()
+        self.gs = GoogleScholarClient() if _HAS_SCHOLARLY else None
 
     def ingest(
         self,
@@ -43,8 +51,9 @@ class PaperIngestionPipeline:
             if progress_callback:
                 progress_callback(msg)
 
-        # Wire S2 client's progress to the same callback
         self.s2.progress_callback = progress_callback
+        if self.gs:
+            self.gs.progress_callback = progress_callback
 
         collection = PaperCollection(topic=topic)
         per_source = max_papers // len(sources)
@@ -80,6 +89,20 @@ class PaperIngestionPipeline:
             for p in s2_papers:
                 collection.add(p)
             _report(f"Semantic Scholar: retrieved {len(s2_papers)} papers")
+
+        if "google_scholar" in sources and self.gs:
+            _report(f"Fetching up to {per_source} papers from Google Scholar...")
+            gs_papers = self.gs.search(
+                query=topic,
+                max_results=per_source,
+                start_year=start_year,
+                end_year=end_year,
+            )
+            for p in gs_papers:
+                collection.add(p)
+            _report(f"Google Scholar: retrieved {len(gs_papers)} papers")
+        elif "google_scholar" in sources and not self.gs:
+            _report("Google Scholar: skipped (scholarly2 not installed — pip install scholarly2)")
 
         # Filter out papers with empty abstracts
         empty_ids = [

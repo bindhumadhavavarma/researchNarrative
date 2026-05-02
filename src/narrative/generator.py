@@ -20,141 +20,102 @@ logger = logging.getLogger(__name__)
 
 
 NARRATIVE_SYSTEM_PROMPT = """\
-You are an expert academic researcher and science writer. Your task is to \
-generate a structured research narrative that tells the "story" of a research \
-area based on the provided papers.
+You are an expert academic researcher and science writer preparing content \
+for a top-tier NLP/AI venue (EMNLP, ACL, NeurIPS). Your task is to generate \
+a structured, publication-quality research narrative that tells the "story" \
+of a research area based on the provided papers.
 
 RULES:
 1. Every factual claim MUST cite at least one paper using [Author et al., Year] format.
-2. Organize the narrative chronologically within each section.
-3. Highlight competing approaches and explain how ideas evolved.
-4. Be concise but comprehensive — aim for depth, not breadth.
+2. Organize content chronologically within each section, showing clear causal progression.
+3. Highlight competing approaches, explain trade-offs, and show how ideas evolved.
+4. Use precise academic language — avoid vague phrases like "some researchers" or "recent work".
 5. Use the EXACT paper information provided; do NOT hallucinate papers or facts.
-6. Write in an academic but accessible style.
-7. When citing, use the first author's surname followed by "et al." and the year.
+6. When citing, use ONLY the first author's SURNAME (family name, last word of their name) \
+followed by "et al." and the year. For example: [Smith et al., 2023], NOT [John Smith et al., 2023].
+7. Draw explicit connections between papers — show how one builds on or challenges another.
+8. Include specific technical details (methods, datasets, metrics) when available in abstracts.
+9. Every paragraph must have at least 2-3 citations to maintain academic rigor.
+10. Use transition phrases that show intellectual progression: "Building on this foundation...", \
+"In contrast to...", "This limitation motivated...", "Extending this paradigm...".
 """
 
-SECTION_ORIGINS = """\
-Write the "Origins & Foundations" section for a research narrative on "{topic}".
+SINGLE_PASS_PROMPT = """\
+Generate a comprehensive, publication-quality research narrative for: "{topic}"
 
-Based on these foundational papers (sorted by influence score):
+I have organized {total_papers} papers into {n_threads} research threads through \
+automated clustering and citation analysis.
 
-{papers_block}
+=== RESEARCH THREADS ===
+{cluster_summaries}
 
-{influence_block}
+=== CITATION & INFLUENCE ANALYSIS ===
+{citation_block}
 
-Write 3-5 paragraphs describing:
-- How this research area began and what problems motivated the initial work
-- Which were the seminal/foundational papers and why they mattered
-- The key ideas or breakthroughs that launched the field
-
-Cite every claim as [Author et al., Year]. Use ONLY the papers listed above.
-"""
-
-SECTION_THREADS = """\
-Write the "Major Research Threads" section for a research narrative on "{topic}".
-
-The following distinct research threads have been identified:
-
-{threads_block}
-
-Write a subsection for each thread (2-3 paragraphs each) explaining:
-- What the thread investigates and its core research questions
-- Key contributions and milestone papers
-- How it relates to or differs from other threads
-
-Cite every claim as [Author et al., Year]. Use ONLY the papers listed above.
-"""
-
-SECTION_COMPETITION = """\
-Write the "Competing Approaches & Trade-offs" section for a research narrative on "{topic}".
-
-Citation analysis has identified these relationships between research threads:
-
-{competition_block}
-
-Papers from the relevant threads:
-
-{papers_block}
-
-Write 2-4 paragraphs analyzing:
-- Which approaches compete and what trade-offs they represent
-- How cross-citation patterns reveal intellectual debate
-- Which complementary threads build upon each other and why
-
-Cite every claim as [Author et al., Year]. Use ONLY the papers listed above.
-"""
-
-SECTION_EVOLUTION = """\
-Write the "Evolution & Paradigm Shifts" section for a research narrative on "{topic}".
-
-Dominance timeline data (thread share of papers per year):
+=== THREAD DOMINANCE OVER TIME ===
 {dominance_block}
 
-Paradigm-shifting papers (high bridge + pioneer scores):
-{shifters_block}
+Write a comprehensive research narrative with these sections. Each section should \
+be 3-5 substantial paragraphs with dense citations:
 
-Write 2-4 paragraphs tracing:
-- How dominant approaches changed over time
-- What caused paradigm shifts (new datasets, methods, results)
-- Which papers bridged different research communities
-
-Cite every claim as [Author et al., Year]. Use ONLY the papers listed above.
-"""
-
-SECTION_FRONTIER = """\
-Write the "Current State & Open Problems" section for a research narrative on "{topic}".
-
-Most recent papers (last 2-3 years), sorted by citation burst score:
-
-{papers_block}
-
-Write 2-4 paragraphs describing:
-- What the current research frontier looks like
-- The most active areas of investigation right now
-- Key open problems and unsolved challenges
-- Promising future directions
-
-Cite every claim as [Author et al., Year]. Use ONLY the papers listed above.
-"""
-
-SYNTHESIS_PROMPT = """\
-You are combining individually-generated sections into a cohesive research narrative on "{topic}".
-
-Here are the sections (each already written with proper citations):
-
-{sections}
-
-Combine them into a single, cohesive research narrative with these sections:
 ## 1. Origins & Foundations
-## 2. Major Research Threads
-## 3. Competing Approaches & Trade-offs
-## 4. Evolution & Paradigm Shifts
-## 5. Current State & Open Problems
+Trace how this research area emerged. Identify the seminal papers that launched \
+the field, the key problems they addressed, and the foundational techniques they \
+introduced. Use influence scores to identify the most impactful early contributions. \
+Show the intellectual lineage — which ideas enabled what came later.
 
-Rules:
-- Keep ALL existing citations [Author et al., Year] intact
-- Add smooth transitions between sections
-- Remove any redundancy between sections
-- Add a brief introductory paragraph before section 1
-- Do NOT add new factual claims or citations that weren't in the sections
-- Output clean markdown
+## 2. Major Research Threads
+For each identified thread, write a focused analysis covering:
+- Core research questions and what distinguishes this thread
+- Key milestone papers and their specific contributions
+- Methodological innovations within the thread
+- How this thread relates to, extends, or diverges from others
+
+## 3. Competing Approaches & Trade-offs
+Analyze the intellectual tensions in this field using the competition data:
+- Which approaches represent genuine alternatives and why
+- What trade-offs each approach makes (accuracy vs efficiency, generality vs specialization)
+- How cross-citation patterns reveal scholarly debate and mutual awareness
+- Which complementary threads build upon each other and why
+
+## 4. Evolution & Paradigm Shifts
+Trace the temporal evolution of the field:
+- How dominant approaches shifted over time (use the dominance timeline data)
+- What triggered major paradigm shifts (new datasets, methods, theoretical insights)
+- Which papers served as bridges between research communities
+- Key turning points where the field's direction changed
+
+## 5. Current State & Open Problems
+Describe the current frontier:
+- The most active and promising research directions right now
+- Key unsolved problems and challenges the community faces
+- Emerging trends suggested by recent high-burst papers
+- Concrete future directions that follow from the current state
+
+IMPORTANT:
+- Cite papers as [Author et al., Year] throughout — every claim needs a citation
+- Use ONLY the papers provided above; do not invent references
+- Aim for depth and analytical insight, not just listing papers
+- Write at least 3-4 paragraphs per section with 2-3 citations per paragraph minimum
+- Show causal connections: how did paper X enable or motivate paper Y?
 """
 
 
 def _format_paper(p: Paper, include_abstract: bool = True) -> str:
     """Format a paper for inclusion in a prompt."""
-    first_author = p.authors[0].name if p.authors else "Unknown"
-    if len(p.authors) > 1:
-        first_author += " et al."
+    if p.authors:
+        surname = p.authors[0].name.split()[-1]
+        first_author = f"{surname} et al." if len(p.authors) > 1 else surname
+    else:
+        first_author = "Unknown"
     line = f"- [{first_author}, {p.year}] \"{p.title}\" (cited {p.citation_count}x)"
     if include_abstract and p.abstract:
-        snippet = p.abstract[:250] + "..." if len(p.abstract) > 250 else p.abstract
-        line += f": {snippet}"
+        snippet = p.abstract[:500] + "..." if len(p.abstract) > 500 else p.abstract
+        line += f"\n  Abstract: {snippet}"
     return line
 
 
-def _format_papers_block(papers: list[Paper], max_papers: int = 20) -> str:
+def _format_papers_block(papers: list[Paper], max_papers: int = 50) -> str:
     """Format a list of papers into a prompt block."""
     selected = papers[:max_papers]
     return "\n".join(_format_paper(p) for p in selected)
@@ -164,7 +125,7 @@ class CitationVerifier:
     """Post-generation verification that narrative citations reference real papers."""
 
     CITATION_PATTERN = re.compile(
-        r'\[([A-Z][a-zA-Z\-\']+(?:\s+et\s+al\.)?),?\s*(\d{4})\]'
+        r'\[([A-Z][a-zA-Z\-\']+(?:\s+[A-Za-z\-\']+)*(?:\s+et\s+al\.)?),?\s*(\d{4})\]'
     )
 
     def __init__(self, papers: list[Paper]):
@@ -179,15 +140,13 @@ class CitationVerifier:
                 continue
             surname = p.authors[0].name.split()[-1].lower()
             self.index[(surname, p.year)].append(p)
+            for author in p.authors[:3]:
+                a_surname = author.name.split()[-1].lower()
+                if a_surname != surname:
+                    self.index[(a_surname, p.year)].append(p)
 
     def verify(self, narrative: str) -> dict:
-        """Verify all citations in a narrative.
-
-        Returns dict with:
-        - verified: list of (citation_text, matched_paper_title)
-        - unverified: list of citation_text that couldn't be matched
-        - stats: {total, verified_count, unverified_count, accuracy}
-        """
+        """Verify all citations in a narrative."""
         citations = self.CITATION_PATTERN.findall(narrative)
         verified = []
         unverified = []
@@ -201,13 +160,21 @@ class CitationVerifier:
             if matches:
                 verified.append((f"[{author_part}, {year_str}]", matches[0].title))
             else:
-                # Fuzzy: try matching just the year and a partial surname
                 found = False
                 for (s, y), papers in self.index.items():
-                    if y == year and surname_lower in s:
+                    if y == year and (surname_lower in s or s in surname_lower):
                         verified.append((f"[{author_part}, {year_str}]", papers[0].title))
                         found = True
                         break
+                if not found:
+                    for (s, y), papers in self.index.items():
+                        if y == year and (
+                            s.startswith(surname_lower[:3]) or
+                            surname_lower.startswith(s[:3])
+                        ):
+                            verified.append((f"[{author_part}, {year_str}]", papers[0].title))
+                            found = True
+                            break
                 if not found:
                     unverified.append(f"[{author_part}, {year_str}]")
 
@@ -240,7 +207,7 @@ class CitationVerifier:
             matches = self.index.get((surname_lower, year), [])
             if not matches:
                 for (s, y), papers in self.index.items():
-                    if y == year and surname_lower in s:
+                    if y == year and (surname_lower in s or s in surname_lower):
                         matches = papers
                         break
 
@@ -269,11 +236,7 @@ class NarrativeGenerator:
         citation_graph: Optional[CitationGraph] = None,
         progress_callback: Optional[callable] = None,
     ) -> str:
-        """Generate a full research narrative with chunking and verification.
-
-        For large corpora, generates each section independently then
-        synthesizes them into a coherent narrative.
-        """
+        """Generate a full research narrative with chunking and verification."""
         all_papers = [p for ps in clusters.values() for p in ps]
         self.verifier = CitationVerifier(all_papers)
 
@@ -291,13 +254,13 @@ class NarrativeGenerator:
         real_clusters = {cid: ps for cid, ps in clusters.items() if cid != -1}
         total_papers = sum(len(ps) for ps in real_clusters.values())
 
-        _report(f"Generating narrative for {total_papers} papers across {len(real_clusters)} threads (single-request)...")
+        _report(f"Generating narrative for {total_papers} papers across {len(real_clusters)} threads...")
         narrative = self._generate_single_pass(
             topic, clusters, cluster_labels,
             influence_scores, competition_analysis, citation_graph
         )
 
-        _report("Generating thread deep-dives (single-request)...")
+        _report("Generating thread deep-dives...")
         self._generate_all_thread_narratives(
             real_clusters, cluster_labels, influence_scores, _report
         )
@@ -334,7 +297,7 @@ class NarrativeGenerator:
                     papers,
                     key=lambda p: influence_scores.get(p.paper_id, {}).get("composite", 0),
                     reverse=True,
-                )[:5]
+                )[:10]
                 for p in ranked:
                     scores = influence_scores.get(p.paper_id, {})
                     first_author = p.authors[0].name if p.authors else "Unknown"
@@ -343,18 +306,19 @@ class NarrativeGenerator:
                     )
 
             inf_block = "\n".join(inf_lines) if inf_lines else ""
-            paper_block = _format_papers_block(sorted_papers, max_papers=25)
+            paper_block = _format_papers_block(sorted_papers, max_papers=40)
 
             prompt = (
-                f"Write a detailed 3-5 paragraph narrative about the research thread "
-                f"\"{thread_label}\" based on these {len(papers)} papers:\n\n{paper_block}\n\n"
+                f'Write a detailed 3-5 paragraph narrative about the research thread '
+                f'"{thread_label}" based on these {len(papers)} papers:\n\n{paper_block}\n\n'
             )
             if inf_block:
                 prompt += f"Most influential papers in this thread:\n{inf_block}\n\n"
             prompt += (
                 "Cover: (1) how this thread started and what motivated it, "
-                "(2) key advances and milestone papers, (3) current state and open questions. "
-                "Cite papers as [Author et al., Year]."
+                "(2) key advances and milestone papers with specific technical details, "
+                "(3) current state and open questions. "
+                "Cite papers as [Author et al., Year]. Every paragraph must have 2+ citations."
             )
 
             response = client.chat.completions.create(
@@ -364,7 +328,7 @@ class NarrativeGenerator:
                     {"role": "system", "content": NARRATIVE_SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
                 ],
-                max_tokens=2000,
+                max_tokens=4000,
             )
             return response.choices[0].message.content
         except Exception as e:
@@ -399,28 +363,13 @@ class NarrativeGenerator:
             dominance_block = self._build_dominance_block(competition_analysis)
 
             total_papers = sum(len(ps) for ps in real_clusters.values())
-            user_prompt = (
-                f'Generate a structured research narrative for the topic: "{topic}"\n\n'
-                f"I have organized {total_papers} papers into {len(real_clusters)} research threads.\n\n"
-                f"{cluster_summaries}\n\n{citation_block}\n\n"
-                f"Thread dominance over time:\n{dominance_block}\n\n"
-                "Write a comprehensive research narrative with these sections:\n\n"
-                "## 1. Origins & Foundations\n"
-                "Describe how this research area began. Which were the seminal papers? "
-                "What problems motivated the initial work? Use the influence scores to "
-                "identify the most foundational papers.\n\n"
-                "## 2. Major Research Threads\n"
-                "For each identified thread, explain what it investigates, key contributions, "
-                "and how it relates to other threads.\n\n"
-                "## 3. Competing Approaches & Trade-offs\n"
-                "Use the competition analysis data to identify competing approaches. "
-                "Explain the trade-offs and cross-citation patterns.\n\n"
-                "## 4. Evolution & Paradigm Shifts\n"
-                "Trace how dominant approaches changed over time. Highlight paradigm-shifting papers.\n\n"
-                "## 5. Current State & Open Problems\n"
-                "What is the frontier right now? What problems remain unsolved?\n\n"
-                "IMPORTANT: Cite papers as [Author et al., Year] throughout. "
-                "Use ONLY the papers provided above. Write at least 3-4 paragraphs per section."
+            user_prompt = SINGLE_PASS_PROMPT.format(
+                topic=topic,
+                total_papers=total_papers,
+                n_threads=len(real_clusters),
+                cluster_summaries=cluster_summaries,
+                citation_block=citation_block,
+                dominance_block=dominance_block,
             )
 
             response = client.chat.completions.create(
@@ -430,7 +379,7 @@ class NarrativeGenerator:
                     {"role": "system", "content": NARRATIVE_SYSTEM_PROMPT},
                     {"role": "user", "content": user_prompt},
                 ],
-                max_tokens=6000,
+                max_tokens=16000,
             )
             return response.choices[0].message.content
 
@@ -447,24 +396,25 @@ class NarrativeGenerator:
         influence_scores: Optional[dict],
         report: callable,
     ) -> None:
-        """Generate all thread deep-dive narratives in a single LLM call."""
+        """Generate each thread narrative individually for maximum quality."""
         if not HAS_LLM:
             for cid, ps in sorted(clusters.items()):
                 label = cluster_labels.get(cid, f"Thread {cid}")
                 self.thread_narratives[cid] = self._thread_summary_fallback(label, ps)
             return
 
-        try:
-            client = get_llm_client()
-            model = get_model_name()
+        client = get_llm_client()
+        model = get_model_name()
+        cid_order = sorted(clusters.keys())
 
-            thread_blocks = []
-            cid_order = sorted(clusters.keys())
-            for cid in cid_order:
-                ps = clusters[cid]
-                label = cluster_labels.get(cid, f"Thread {cid}")
+        for idx, cid in enumerate(cid_order):
+            ps = clusters[cid]
+            label = cluster_labels.get(cid, f"Thread {cid}")
+            report(f"Generating narrative for thread {idx+1}/{len(cid_order)}: {label}")
+
+            try:
                 sorted_papers = sorted(ps, key=lambda p: (p.year or 0))
-                paper_block = _format_papers_block(sorted_papers, max_papers=15)
+                paper_block = _format_papers_block(sorted_papers, max_papers=40)
 
                 inf_lines = ""
                 if influence_scores:
@@ -472,7 +422,7 @@ class NarrativeGenerator:
                         ps,
                         key=lambda p: influence_scores.get(p.paper_id, {}).get("composite", 0),
                         reverse=True,
-                    )[:3]
+                    )[:10]
                     inf_parts = []
                     for p in ranked:
                         scores = influence_scores.get(p.paper_id, {})
@@ -481,57 +431,47 @@ class NarrativeGenerator:
                             f"  - [{first_author}, {p.year}]: composite={scores.get('composite', 0):.3f}"
                         )
                     if inf_parts:
-                        inf_lines = "\nMost influential:\n" + "\n".join(inf_parts)
+                        inf_lines = "\nMost influential papers:\n" + "\n".join(inf_parts)
 
-                thread_blocks.append(
-                    f"### THREAD {cid}: {label} ({len(ps)} papers)\n"
-                    f"{paper_block}{inf_lines}"
+                prompt = (
+                    f"Write a focused, publication-quality deep-dive narrative for the following "
+                    f"research thread.\n\n"
+                    f"### THREAD: {label} ({len(ps)} papers)\n"
+                    f"{paper_block}{inf_lines}\n\n"
+                    f"Write 5-7 substantial paragraphs covering:\n"
+                    f"(1) Origins and motivation — what problem launched this thread\n"
+                    f"(2) Key methodological innovations — specific techniques, architectures, or algorithms\n"
+                    f"(3) Milestone papers — detailed discussion of their contributions and impact\n"
+                    f"(4) Connections to broader research landscape and cross-pollination of ideas\n"
+                    f"(5) Current state — latest work, remaining gaps, and open questions\n\n"
+                    f"Be thorough: reference as many of the listed papers as possible. "
+                    f"Discuss specific methods, datasets, and results when available. "
+                    f"Cite papers as [Author et al., Year]. "
+                    f"Every paragraph must have at least 2-3 citations."
                 )
 
-            all_threads = "\n\n---\n\n".join(thread_blocks)
-            prompt = (
-                f"Write a focused deep-dive narrative for EACH of the following {len(cid_order)} "
-                f"research threads. For each thread, write 2-3 paragraphs covering:\n"
-                f"(1) how the thread started, (2) key advances, (3) current state.\n\n"
-                f"Separate each thread narrative with a line containing only: "
-                f"===THREAD_SEPARATOR===\n\n"
-                f"Output them in the SAME ORDER as listed below. "
-                f"Cite papers as [Author et al., Year].\n\n{all_threads}"
-            )
+                response = client.chat.completions.create(
+                    model=model,
+                    temperature=LLM_TEMPERATURE,
+                    messages=[
+                        {"role": "system", "content": NARRATIVE_SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt},
+                    ],
+                    max_tokens=4000,
+                )
+                self.thread_narratives[cid] = response.choices[0].message.content
 
-            response = client.chat.completions.create(
-                model=model,
-                temperature=LLM_TEMPERATURE,
-                messages=[
-                    {"role": "system", "content": NARRATIVE_SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt},
-                ],
-                max_tokens=5000,
-            )
-            result = response.choices[0].message.content
-
-            parts = [p.strip() for p in result.split("===THREAD_SEPARATOR===") if p.strip()]
-
-            for i, cid in enumerate(cid_order):
-                if i < len(parts):
-                    self.thread_narratives[cid] = parts[i]
-                else:
-                    label = cluster_labels.get(cid, f"Thread {cid}")
-                    self.thread_narratives[cid] = self._thread_summary_fallback(label, clusters[cid])
-
-            report(f"Generated {len(self.thread_narratives)} thread narratives")
-
-        except Exception as e:
-            logger.error(f"Batch thread narrative generation failed: {e}")
-            for cid, ps in sorted(clusters.items()):
-                label = cluster_labels.get(cid, f"Thread {cid}")
+            except Exception as e:
+                logger.error(f"Thread {cid} narrative generation failed: {e}")
                 self.thread_narratives[cid] = self._thread_summary_fallback(label, ps)
+
+        report(f"Generated {len(self.thread_narratives)} thread narratives")
 
     def _build_thread_block(self, cid: int, label: str, papers: list[Paper]) -> str:
         """Build a summary block for one thread."""
         sorted_papers = sorted(papers, key=lambda p: (p.year or 0, -p.citation_count))
         lines = [f"### Thread {cid}: {label} ({len(papers)} papers)"]
-        for p in sorted_papers[:15]:
+        for p in sorted_papers[:40]:
             lines.append(_format_paper(p))
         return "\n".join(lines)
 
@@ -550,7 +490,7 @@ class NarrativeGenerator:
                 influence_scores.items(),
                 key=lambda x: x[1].get("composite", 0),
                 reverse=True,
-            )[:10]
+            )[:30]
             lines = ["### Most Influential Papers (by composite influence score)"]
             for pid, scores in ranked:
                 paper = citation_graph.get_paper(pid) if citation_graph else None
@@ -562,7 +502,8 @@ class NarrativeGenerator:
                         f"Authority: {scores['authority']:.3f}, "
                         f"Bridge: {scores['bridge']:.3f}, "
                         f"Pioneer: {scores['temporal_pioneer']:.3f}, "
-                        f"Burst: {scores['citation_burst']:.3f}"
+                        f"Burst: {scores['citation_burst']:.3f}, "
+                        f"Composite: {scores['composite']:.3f}"
                     )
             parts.append("\n".join(lines))
 
@@ -731,7 +672,7 @@ class NarrativeGenerator:
         for p in earliest:
             first_author = p.authors[0].name if p.authors else "Unknown"
             lines.append(
-                f"- **[{first_author}, {p.year}]** \"{p.title}\" — "
+                f"- **[{first_author} et al., {p.year}]** \"{p.title}\" — "
                 f"Cited {p.citation_count} times."
             )
         lines.append("")
@@ -827,6 +768,6 @@ class NarrativeGenerator:
         for p in sorted_papers[:10]:
             first_author = p.authors[0].name if p.authors else "Unknown"
             lines.append(
-                f"- [{first_author}, {p.year}] \"{p.title}\" ({p.citation_count} citations)"
+                f"- [{first_author} et al., {p.year}] \"{p.title}\" ({p.citation_count} citations)"
             )
         return "\n".join(lines)

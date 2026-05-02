@@ -8,6 +8,7 @@ performance without requiring manual assessment.
 from __future__ import annotations
 import logging
 import re
+import math
 from collections import Counter, defaultdict
 from typing import Optional
 
@@ -53,7 +54,8 @@ class PipelineEvaluator:
             return {"score": 0, "details": {}}
 
         source_counts = Counter(p.source for p in papers)
-        source_diversity = len(source_counts) / max(len(source_counts), 1)
+        n_sources = len(source_counts)
+        source_diversity = min(n_sources / 2.0, 1.0)
 
         has_abstract = sum(1 for p in papers if p.abstract and len(p.abstract) > 50)
         abstract_coverage = has_abstract / total
@@ -61,9 +63,7 @@ class PipelineEvaluator:
         has_year = sum(1 for p in papers if p.year)
         has_authors = sum(1 for p in papers if p.authors)
         has_citations = sum(1 for p in papers if p.citation_count > 0)
-        metadata_completeness = (
-            (has_year + has_authors + has_citations) / (3 * total)
-        )
+        metadata_completeness = (has_year + has_authors + has_citations) / (3 * total)
 
         years = [p.year for p in papers if p.year]
         year_span = max(years) - min(years) if len(years) >= 2 else 0
@@ -73,12 +73,18 @@ class PipelineEvaluator:
             for a in p.authors:
                 unique_authors.add(a.name.lower())
 
+        volume_score = min(total / 50, 1.0)
+        year_score = min(year_span / 10, 1.0)
+
         score = (
-            0.30 * abstract_coverage
-            + 0.25 * metadata_completeness
-            + 0.25 * min(source_diversity, 1.0)
-            + 0.20 * min(year_span / 15, 1.0)
+            0.25 * abstract_coverage
+            + 0.20 * metadata_completeness
+            + 0.20 * source_diversity
+            + 0.20 * year_score
+            + 0.15 * volume_score
         )
+
+        score = min(score, 1.0)
 
         return {
             "score": round(score, 3),
@@ -108,7 +114,7 @@ class PipelineEvaluator:
         labels = np.array([p.cluster_id for p in papers])
         non_noise_mask = labels != -1
 
-        silhouette = -1.0
+        silhouette = None
         if n_clusters >= 2 and np.sum(non_noise_mask) >= n_clusters + 1:
             try:
                 from sklearn.metrics import silhouette_score
@@ -121,7 +127,7 @@ class PipelineEvaluator:
             except Exception as e:
                 logger.warning(f"Silhouette score failed: {e}")
 
-        davies_bouldin = -1.0
+        davies_bouldin = None
         if n_clusters >= 2 and np.sum(non_noise_mask) >= n_clusters + 1:
             try:
                 from sklearn.metrics import davies_bouldin_score
@@ -135,24 +141,29 @@ class PipelineEvaluator:
         sizes = [len(ps) for ps in real_clusters.values()]
         size_std = float(np.std(sizes)) if sizes else 0
         size_cv = size_std / np.mean(sizes) if sizes and np.mean(sizes) > 0 else 0
-        balance_score = max(0, 1.0 - size_cv)
+        balance_score = max(0, 1.0 - size_cv * 0.5)
 
-        silhouette_norm = max(0, (silhouette + 1) / 2) if silhouette > -1 else 0.5
-        noise_quality = max(0, 1.0 - noise_ratio * 2)
+        if silhouette is not None:
+            silhouette_norm = self._sigmoid_scale(silhouette, center=0.15, steepness=8)
+        else:
+            silhouette_norm = 0.5
+
+        noise_quality = max(0, 1.0 - noise_ratio * 1.5)
+        cluster_count_score = min(n_clusters / 3, 1.0)
 
         score = (
-            0.40 * silhouette_norm
-            + 0.20 * balance_score
+            0.35 * silhouette_norm
+            + 0.25 * balance_score
             + 0.20 * noise_quality
-            + 0.20 * min(n_clusters / 5, 1.0)
+            + 0.20 * cluster_count_score
         )
 
         return {
-            "score": round(score, 3),
+            "score": round(min(score, 1.0), 3),
             "details": {
                 "n_clusters": n_clusters,
-                "silhouette_score": round(silhouette, 4) if silhouette > -1 else None,
-                "davies_bouldin_index": round(davies_bouldin, 4) if davies_bouldin > -1 else None,
+                "silhouette_score": round(silhouette, 4) if silhouette is not None else None,
+                "davies_bouldin_index": round(davies_bouldin, 4) if davies_bouldin is not None else None,
                 "noise_ratio": round(noise_ratio, 3),
                 "cluster_sizes": sizes,
                 "balance_score": round(balance_score, 3),
@@ -176,19 +187,22 @@ class PipelineEvaluator:
         density = n_edges / (n_nodes * (n_nodes - 1)) if n_nodes > 1 else 0
 
         in_degrees = [g.in_degree(n) for n in g.nodes]
-        connected_nodes = sum(1 for d in in_degrees if d > 0)
+        out_degrees = [g.out_degree(n) for n in g.nodes]
+        connected_nodes = sum(1 for i, o in zip(in_degrees, out_degrees) if i > 0 or o > 0)
         connectivity = connected_nodes / n_nodes if n_nodes > 0 else 0
 
         avg_degree = np.mean(in_degrees) if in_degrees else 0
+        edge_ratio = min(n_edges / max(n_nodes, 1), 5.0) / 5.0
 
         score = (
-            0.40 * enrichment_coverage
-            + 0.30 * connectivity
-            + 0.30 * min(avg_degree / 3, 1.0)
+            0.30 * min(enrichment_coverage * 2, 1.0)
+            + 0.25 * connectivity
+            + 0.25 * edge_ratio
+            + 0.20 * min(avg_degree / 2, 1.0)
         )
 
         return {
-            "score": round(score, 3),
+            "score": round(min(score, 1.0), 3),
             "details": {
                 "nodes": n_nodes,
                 "edges": n_edges,
@@ -216,7 +230,7 @@ class PipelineEvaluator:
         n_paragraphs = len(paragraphs)
 
         citation_pattern = re.compile(
-            r'\[([A-Z][a-zA-Z\-\']+(?:\s+et\s+al\.)?),?\s*(\d{4})\]'
+            r'\[([A-Z][a-zA-Z\-\']+(?:\s+[A-Za-z\-\']+)*(?:\s+et\s+al\.)?),?\s*(\d{4})\]'
         )
         citations = citation_pattern.findall(narrative)
         n_citations = len(citations)
@@ -241,19 +255,21 @@ class PipelineEvaluator:
         if citation_verification:
             citation_accuracy = citation_verification["stats"]["accuracy"]
 
-        length_score = min(word_count / 1500, 1.0)
-        structure_score = min(n_sections / 5, 1.0)
+        length_score = min(word_count / 800, 1.0)
+        structure_score = min(n_sections / 4, 1.0)
+        density_score = min(citation_density / 1.5, 1.0)
+        coverage_score = min(coverage / 0.15, 1.0)
 
         score = (
             0.25 * citation_accuracy
-            + 0.25 * min(citation_density / 2, 1.0)
-            + 0.20 * min(coverage * 5, 1.0)
-            + 0.15 * length_score
+            + 0.20 * density_score
+            + 0.20 * coverage_score
+            + 0.20 * length_score
             + 0.15 * structure_score
         )
 
         return {
-            "score": round(score, 3),
+            "score": round(min(score, 1.0), 3),
             "details": {
                 "word_count": word_count,
                 "n_sections": n_sections,
@@ -270,8 +286,8 @@ class PipelineEvaluator:
         """Weighted combination of all sub-scores."""
         weights = {
             "retrieval": 0.20,
-            "clustering": 0.25,
-            "citation_graph": 0.20,
+            "clustering": 0.20,
+            "citation_graph": 0.25,
             "narrative": 0.35,
         }
         total = sum(
@@ -280,7 +296,7 @@ class PipelineEvaluator:
             if k in self.metrics
         )
         return {
-            "score": round(total, 3),
+            "score": round(min(total, 1.0), 3),
             "weights": weights,
             "component_scores": {
                 k: self.metrics[k]["score"]
@@ -289,18 +305,23 @@ class PipelineEvaluator:
             },
         }
 
+    @staticmethod
+    def _sigmoid_scale(value: float, center: float = 0.0, steepness: float = 5.0) -> float:
+        """Map a value to [0, 1] using a sigmoid, centered at `center`."""
+        return 1.0 / (1.0 + math.exp(-steepness * (value - center)))
+
     def get_grade(self) -> str:
         """Return a letter grade based on the overall score."""
         score = self.metrics.get("overall", {}).get("score", 0)
-        if score >= 0.9:
+        if score >= 0.85:
             return "A+"
-        elif score >= 0.8:
+        elif score >= 0.75:
             return "A"
-        elif score >= 0.7:
+        elif score >= 0.65:
             return "B+"
-        elif score >= 0.6:
+        elif score >= 0.55:
             return "B"
-        elif score >= 0.5:
+        elif score >= 0.45:
             return "C"
         else:
             return "D"
@@ -315,30 +336,68 @@ class PipelineEvaluator:
 
         r_details = retrieval.get("details", {})
         if r_details.get("abstract_coverage", 1) < 0.8:
-            recs.append("Low abstract coverage — some papers may lack abstracts, which affects embedding quality.")
+            recs.append(
+                "**Retrieval**: Low abstract coverage — some papers may lack abstracts, "
+                "which affects embedding quality. Consider enriching from Semantic Scholar."
+            )
         if r_details.get("year_span", 0) < 5:
-            recs.append("Narrow year range — consider broadening the time range for more comprehensive coverage.")
+            recs.append(
+                "**Retrieval**: Narrow year range — consider broadening the time range "
+                "for more comprehensive historical coverage."
+            )
+        if r_details.get("total_papers", 0) < 50:
+            recs.append(
+                "**Retrieval**: Small corpus — increasing the max papers setting will "
+                "improve clustering and narrative quality."
+            )
 
         c_details = clustering.get("details", {})
         sil = c_details.get("silhouette_score")
-        if sil is not None and sil < 0.2:
-            recs.append("Low silhouette score — clusters may not be well-separated. Try adjusting HDBSCAN parameters.")
+        if sil is not None and sil < 0.1:
+            recs.append(
+                "**Clustering**: Low silhouette score — clusters may overlap. "
+                "Try adjusting HDBSCAN min_cluster_size or using a different topic scope."
+            )
         if c_details.get("noise_ratio", 0) > 0.3:
-            recs.append("High noise ratio — many papers are unclustered. Lowering min_cluster_size may help.")
+            recs.append(
+                "**Clustering**: High noise ratio — many papers are unclustered. "
+                "Lowering min_cluster_size may help capture more papers into threads."
+            )
 
         cg_details = citation.get("details", {})
         if cg_details.get("connectivity", 1) < 0.3:
-            recs.append("Low citation graph connectivity — enable citation enrichment for better graph coverage.")
+            recs.append(
+                "**Citation Graph**: Low connectivity — enable citation enrichment "
+                "for better graph coverage and influence analysis."
+            )
+        if cg_details.get("edges", 0) < 10:
+            recs.append(
+                "**Citation Graph**: Very few internal citation links found. "
+                "This may indicate the papers don't cite each other much, "
+                "or citation data is sparse."
+            )
 
         n_details = narrative.get("details", {})
         if n_details.get("citation_accuracy", 1) < 0.7:
-            recs.append("Citation accuracy below 70% — narrative may reference papers outside the collection.")
+            recs.append(
+                "**Narrative**: Citation accuracy below 70% — the narrative may reference "
+                "papers outside the collection. The LLM may need stronger grounding."
+            )
         if n_details.get("citation_density", 0) < 1:
-            recs.append("Low citation density — narrative paragraphs should cite more papers for better grounding.")
-        if n_details.get("paper_coverage", 0) < 0.1:
-            recs.append("Low paper coverage — narrative cites very few of the retrieved papers.")
+            recs.append(
+                "**Narrative**: Low citation density — paragraphs should cite more "
+                "papers for better academic grounding."
+            )
+        if n_details.get("paper_coverage", 0) < 0.05:
+            recs.append(
+                "**Narrative**: Very few retrieved papers are cited in the narrative. "
+                "Consider increasing the number of papers included in the LLM prompt."
+            )
 
         if not recs:
-            recs.append("All metrics are within acceptable ranges. The pipeline is performing well.")
+            recs.append(
+                "All metrics are within acceptable ranges. The pipeline is performing well "
+                "for the given corpus."
+            )
 
         return recs

@@ -2,6 +2,7 @@
 requests>=2.31.0
 aiohttp>=3.9.0
 xmltodict>=0.13.0
+scholarly2>=2.0.0
 
 # Embeddings
 sentence-transformers>=3.0.0
